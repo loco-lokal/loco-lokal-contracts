@@ -1,6 +1,6 @@
-<a href="/" class="flex justify-center items-center">
-  <span class="mr-3">
-    <%= render 'shared/logo', width: '50px', height: '50px' %>
-  </span>
-  <h1 class="text-5xl font-bold text-center">DocuSeal</h1>
-</a>
+<div class="agency-signing-brand">
+  <a href="<%= root_path %>">
+    <%= render 'shared/agency_wordmark' %>
+  </a>
+  <span class="agency-engine"><%= t('powered_by') %> <%= Docuseal.product_name %></span>
+</div>

@@ -1,6 +1,6 @@
 <template>
   <div
-    class="relative select-none mb-4 before:border before:rounded before:top-0 before:bottom-0 before:left-0 before:right-0 before:absolute"
+    class="agency-document relative select-none mb-4 before:border before:rounded before:top-0 before:bottom-0 before:left-0 before:right-0 before:absolute"
     :class="{ 'cursor-crosshair': allowDraw && editable && !isSelectMode, 'touch-none': !!(drawField || drawCustomField) }"
     style="container-type: size"
     :style="{ aspectRatio: `${width} / ${height}`}"

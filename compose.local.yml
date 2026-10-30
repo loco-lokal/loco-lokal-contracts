@@ -1,0 +1,36 @@
+name: loco-lokal-docs-local
+
+services:
+  app:
+    build: .
+    image: loco-lokal-docs:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:3000:3000'
+    environment:
+      APP_URL: http://localhost:3000
+      DATABASE_URL: postgresql://docuseal:docuseal_local@postgres:5432/docuseal
+    volumes:
+      - documents:/data/docuseal
+
+  postgres:
+    image: postgres:18.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: docuseal
+      POSTGRES_PASSWORD: docuseal_local
+      POSTGRES_DB: docuseal
+    volumes:
+      - postgres:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U docuseal -d docuseal']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  documents:
+  postgres:

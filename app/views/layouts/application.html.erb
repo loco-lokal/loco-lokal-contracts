@@ -20,7 +20,7 @@
     <% end %>
     <%= stylesheet_pack_tag 'application', media: 'all', data: { turbo_track: 'dynamic' } %>
   </head>
-  <body>
+  <body class="agency-ui agency-app">
     <% if params[:modal].present? %>
       <% modal_uri = Addressable::URI.parse(params[:modal]) %>
       <% url_params = Rails.application.routes.recognize_path(modal_uri.path, method: :get) %>
@@ -33,9 +33,14 @@
     <% end %>
     <turbo-frame id="drawer"></turbo-frame>
     <%= render turbo_native_app? ? 'shared/native_navbar' : 'shared/navbar' %>
-    <main class="max-w-6xl mx-auto px-4 md:px-2 mb-8">
+    <main class="agency-workspace max-w-6xl mx-auto px-4 md:px-2 mb-8">
       <%= yield %>
     </main>
+    <% unless turbo_native_app? %>
+      <footer class="agency-footer">
+        <%= render 'shared/powered_by' %>
+      </footer>
+    <% end %>
     <% if flash.present? %><%= render 'shared/flash' %><% end %>
     <%= render 'shared/body_scripts' %>
   </body>

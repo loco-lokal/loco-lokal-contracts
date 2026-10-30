@@ -2,6 +2,13 @@ module.exports = {
   future: {
     hoverOnlyWhenSupported: true
   },
+  theme: {
+    extend: {
+      fontFamily: {
+        display: ['Anybody', 'Impact', 'sans-serif']
+      }
+    }
+  },
   plugins: [
     require('daisyui')
   ],
@@ -10,15 +17,21 @@ module.exports = {
       {
         docuseal: {
           'color-scheme': 'light',
-          primary: '#e4e0e1',
-          secondary: '#ef9fbc',
-          accent: '#eeaf3a',
-          neutral: '#291334',
-          'base-100': '#faf7f5',
-          'base-200': '#efeae6',
-          'base-300': '#e7e2df',
-          'base-content': '#291334',
-          '--rounded-btn': '1.9rem',
+          primary: '#ffd700',
+          'primary-content': '#14130f',
+          secondary: '#f6f1e2',
+          'secondary-content': '#14130f',
+          accent: '#f5b400',
+          'accent-content': '#14130f',
+          neutral: '#14130f',
+          'neutral-content': '#ffffff',
+          'base-100': '#ffffff',
+          'base-200': '#f3f2ee',
+          'base-300': '#ebeae5',
+          'base-content': '#14130f',
+          '--rounded-box': '1.5rem',
+          '--rounded-btn': '999px',
+          '--rounded-badge': '999px',
           '--tab-border': '2px',
           '--tab-radius': '.5rem'
         }
