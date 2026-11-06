@@ -54,3 +54,35 @@ pub async fn users_count(pool: &PgPool) -> Result<i64, DbError> {
 
     Ok(count)
 }
+
+/// A row of `encrypted_configs`. `value` is Active Record–encrypted JSON
+/// (`serialize :value, coder: JSON` + `encrypts :value`); decrypt it with `loco-rails-compat`.
+#[derive(Clone, Debug)]
+pub struct EncryptedConfigRow {
+    pub account_id: i64,
+    pub account_name: String,
+    pub value: String,
+}
+
+/// `EncryptedConfig.order(:account_id).find_by(key:)`, with the owning account's name.
+pub async fn first_encrypted_config(
+    pool: &PgPool,
+    key: &str,
+) -> Result<Option<EncryptedConfigRow>, DbError> {
+    let row = sqlx::query_as!(
+        EncryptedConfigRow,
+        r#"
+        SELECT c.account_id, a.name AS account_name, c.value
+        FROM encrypted_configs c
+        JOIN accounts a ON a.id = c.account_id
+        WHERE c.key = $1
+        ORDER BY c.account_id
+        LIMIT 1
+        "#,
+        key
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row)
+}

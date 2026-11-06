@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE rust_jobs SET locked_at = NULL, locked_by = NULL, last_error = $2, run_at = now() + make_interval(secs => $3) WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fdc45ac94a4e5d82ab603427b841484898197f7a4d80830f9ebaea87c2cc7f11"
+}

@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH inserted AS (\n          INSERT INTO rust_jobs (queue, kind, payload, max_attempts, run_at)\n          VALUES ($1, $2, $3, $4, COALESCE($5, now()))\n          RETURNING id, queue\n        )\n        SELECT id AS \"id!\" FROM inserted, LATERAL (SELECT pg_notify($6, inserted.queue)) n\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "rust_jobs",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        "Int4",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ae3b71d54d7489b20527f159fbfb6efe4da4a870456ae451044cb699041a7d3b"
+}

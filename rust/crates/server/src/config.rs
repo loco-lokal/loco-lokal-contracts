@@ -16,6 +16,13 @@ pub struct Config {
     pub encryption_secret: Option<String>,
     pub workdir: PathBuf,
     pub app_url: Option<String>,
+    /// Directory holding `app/`, `config/`, `public/`, and `rust/templates`
+    /// (`APP_ROOT`; defaults to the repository root this binary was built from).
+    pub app_root: PathBuf,
+    /// `RAILS_ENV=production` disables template and asset-manifest reloading.
+    pub production: bool,
+    /// Background job worker slots in this process (`JOB_CONCURRENCY`, 0 disables).
+    pub job_concurrency: usize,
 }
 
 impl Config {
@@ -53,6 +60,14 @@ impl Config {
             encryption_secret: var("ENCRYPTION_SECRET"),
             workdir,
             app_url: var("APP_URL"),
+            app_root: var("APP_ROOT").map_or_else(
+                || PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../..")),
+                PathBuf::from,
+            ),
+            production: var("RAILS_ENV").as_deref() == Some("production"),
+            job_concurrency: var("JOB_CONCURRENCY")
+                .map_or(Ok(5), |n| n.parse())
+                .context("invalid JOB_CONCURRENCY")?,
         })
     }
 }

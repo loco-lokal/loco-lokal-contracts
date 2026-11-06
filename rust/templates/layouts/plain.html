@@ -1,0 +1,18 @@
+{#- Port of app/views/layouts/plain.html.erb -#}
+<!DOCTYPE html>
+<html data-theme="docuseal" lang="{{ locale }}">
+  <head>
+    {% include "layouts/_head_tags.html" %}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{ csrf_meta_tags() }}
+    {{ javascript_pack_tag('application', defer=true) }}
+    {{ stylesheet_pack_tag('application', media='all', turbo_track='dynamic') }}
+  </head>
+  <body class="agency-ui agency-plain">
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+    <turbo-frame id="modal"></turbo-frame>
+    {% if flash and (flash.notice or flash.alert) %}{% include "shared/_flash.html" %}{% endif %}
+  </body>
+</html>

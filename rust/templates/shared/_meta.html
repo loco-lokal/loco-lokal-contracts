@@ -1,0 +1,30 @@
+{#- Port of app/views/shared/_meta.html.erb -#}
+{% if robots_noindex %}
+  <meta name="robots" content="noindex">
+{% endif %}
+{% set title = html_title or t('agency.page_title') %}
+{% set description = html_description or t('agency.description') %}
+<meta name="description" content="{{ description }}">
+<meta property="og:title" content="{{ title }}">
+<meta property="og:description" content="{{ description }}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ root_url }}">
+<meta property="og:site_name" content="Loco Lokal">
+{% if disable_image_preview %}
+  <meta property="og:image" content="">
+  <meta name="twitter:image" content="">
+{% else %}
+  <meta property="og:image" content="{{ preview_image_url or root_url ~ 'preview.png' }}">
+  <meta property="og:image:width" content="800">
+  <meta property="og:image:height" content="800">
+  <meta name="twitter:image" content="{{ preview_image_url or root_url ~ 'preview.png' }}">
+{% endif %}
+<meta name="twitter:card" content="summary">
+<meta name="twitter:creator" content="@docusealco">
+<meta name="twitter:site" content="@docusealco">
+<meta name="twitter:title" content="{{ title }}">
+<meta name="twitter:description" content="{{ description }}">
+<link rel="apple-touch-icon" sizes="64x64" href="/loco-lokal-icon.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/loco-lokal-icon.png">
+<link rel="icon" type="image/svg+xml" href="/loco-lokal-mark.svg">
+<meta name="theme-color" content="#ffd700">

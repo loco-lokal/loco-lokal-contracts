@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, name, record_type, record_id, blob_id, uuid, created_at\n            FROM active_storage_attachments\n            WHERE record_type = $1 AND record_id = $2 AND name = $3\n            ORDER BY id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "record_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "record_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "record_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "record_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "blob_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "blob_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "uuid",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "uuid"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e32c43fa42e0ca87c0f7db49cdf90f66756b6990c59f15fceb7a60d0374fe73c"
+}

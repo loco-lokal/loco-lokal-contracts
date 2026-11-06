@@ -127,7 +127,9 @@ If prerequisites prevent execution, report the missing dependency and the checks
 A Rust replacement for the Rails backend is in progress under `rust/`. It is a Cargo workspace with `axum`, `sqlx` (PostgreSQL only), and `minijinja`. Setup, the dev services (`compose.rust-dev.yml`: Postgres on 5435, Mailpit, and Rails as the reference app), and the checks are documented in `rust/README.md`.
 
 - Rails migrations own the schema until cutover. After they change, regenerate `rust/schema/baseline.sql` (`rust/scripts/dump-schema.sh`) and `rust/.sqlx` (`cargo sqlx prepare --workspace`).
-- Rust code must stay compatible with Rails-produced data: the existing tables, the Active Storage layout, encrypted columns, signed ids, and Devise hashes.
+- Rust code must stay compatible with Rails-produced data: the existing tables, the Active Storage layout, encrypted columns, signed ids, and Devise hashes. `crates/rails-compat` is checked against values Rails generated (`rust/scripts/generate-golden.sh`).
+- Rust-only tables (such as the `rust_jobs` queue) are added through `rust/crates/*/migrations`, never through Rails migrations.
+- Templates in `rust/templates/` are ports of `app/views`. The Rust server reads `app/views/icons`, `app/views/errors`, `config/locales`, and `public/` directly, so keep those in place until cutover.
 - CI runs the `Rust` job (fmt, clippy `-D warnings`, nextest, sqlx offline check, cargo-deny).
 
 ## Contribution conventions

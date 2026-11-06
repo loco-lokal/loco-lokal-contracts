@@ -6,6 +6,25 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+aes-gcm = "0.11.1"
+base64 = "0.23.1"
+bcrypt = "0.19.3"
+chrono = { version = "0.4.45", features = ["serde"] }
+flate2 = "1.1.11"
+hex = "0.4.3"
+hmac = "0.13.0"
+pbkdf2 = "0.13.0"
+rand = "0.10.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha1 = "0.11.0"
+sha2 = "0.11.1"
+subtle = "2.6.1"
+thiserror = "2.0.21"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+chrono = "0.4.45"
+serde_json = "1.0.154"

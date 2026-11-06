@@ -188,8 +188,12 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports: ['1025:1025', '8025:8025']
     env:
       SQLX_OFFLINE: 'true'
+      MAILPIT_URL: http://localhost:8025
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/docuseal_rust_test
       CARGO_TERM_COLOR: always
     steps:
@@ -212,8 +216,10 @@ jobs:
           tool: cargo-nextest,cargo-deny
       - name: Fetch pdfium
         run: scripts/fetch-pdfium.sh
-      - name: Load baseline schema
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f schema/baseline.sql
+      - name: Load baseline schema and Rust-owned tables
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f schema/baseline.sql
+          for f in crates/*/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"; done
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy

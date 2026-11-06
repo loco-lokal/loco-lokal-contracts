@@ -41,6 +41,20 @@ cd rust && cargo sqlx prepare --workspace    # rust/.sqlx offline query data
 
 Also update `EXPECTED_SCHEMA_VERSION` in `crates/db/src/lib.rs`.
 
+Tables that only the Rust backend uses (currently the `rust_jobs` queue) live in `crates/*/migrations/`. The server applies them at boot, and they are kept out of `baseline.sql`. Apply them to the dev database by hand when query macros need them:
+
+```sh
+cd rust && sqlx migrate run --source crates/jobs/migrations
+```
+
+## Golden fixtures
+
+`crates/rails-compat/tests/fixtures/golden.json` holds values that Rails produced with the dev `SECRET_KEY_BASE`: encrypted columns, signed ids, an encrypted SMTP config, and a bcrypt hash. Tests check that Rust reads and writes the same formats. To regenerate the file, with the `rails` service running:
+
+```sh
+rust/scripts/generate-golden.sh
+```
+
 ## Running
 
 ```sh
@@ -57,14 +71,27 @@ The server reads the same variables as Rails:
 - `SECRET_KEY_BASE`, or `$WORKDIR/docuseal.env`
 - `ENCRYPTION_SECRET`, `WORKDIR`, `APP_URL`
 
-It also reads `PORT` (default 8080), `BIND_HOST` (default 127.0.0.1), and `DATABASE_POOL`.
+- Storage: `S3_ATTACHMENTS_BUCKET`/`AWS_*`/`S3_ENDPOINT`, `GCS_*`, `AZURE_*`. Without any of these, files go to `$WORKDIR/attachments`; in production the stored storage settings apply instead.
+- Mail: `SMTP_*`, including `SMTP_FROM`. Without these, the stored SMTP settings apply; with neither, mail is discarded.
+- `RAILS_ENV=production`, which turns off template and asset-manifest reloading.
+
+It also reads these, which Rails doesn't use:
+
+- `PORT` (default 8080) and `BIND_HOST` (default 127.0.0.1)
+- `DATABASE_POOL`
+- `JOB_CONCURRENCY` (default 5; 0 disables the in-process job worker)
+- `APP_ROOT`: the directory with `app/`, `config/`, `public/`, and `rust/templates`; defaults to this checkout
+
+To send development mail to Mailpit, add `SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false`.
+
+Pages are minijinja ports of `app/views` in `rust/templates/`. They use the Shakapacker asset build from `public/packs/manifest.json`, the icons in `app/views/icons/`, and the translations in `config/locales/`.
 
 ## Checks (same as CI)
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace       # needs DATABASE_URL and pdfium
+cargo nextest run --workspace       # needs DATABASE_URL and pdfium; MAILPIT_URL=http://localhost:8025 enables the SMTP test
 cargo sqlx prepare --workspace --check
 cargo deny check
 ```
@@ -75,7 +102,9 @@ Set `SQLX_OFFLINE=true` to build without a database.
 
 | Crate | Replaces |
 | --- | --- |
-| `server` | Controllers, routes, views (minijinja templates), middleware |
+| `server` | Controllers, routes, middleware, error pages, boot |
+| `views` | ERB views (minijinja), `I18n.t`, pack tags, `svg_icon` |
+| `mailer` | ActionMailer delivery and the SMTP settings interceptor |
 | `db` | ActiveRecord models and queries |
 | `domain` | `lib/submissions`, `lib/submitters`, `lib/templates` |
 | `rails-compat` | AR encryption, `MessageVerifier`, Devise bcrypt, CSRF |

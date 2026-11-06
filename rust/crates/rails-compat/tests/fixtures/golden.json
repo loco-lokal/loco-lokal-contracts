@@ -1,0 +1,87 @@
+{
+  "secret_key_base": "rust-dev-secret-key-base-not-for-production-use-0123456789abcdef0123456789abcdef",
+  "encryption": {
+    "primary_key": "b9ce26c4b4ff6b10022458875bc34d60",
+    "key_derivation_salt": "45991481d0bf0e49cbcc6adb12b0117ecf1551aec76fc67bbba56b4b18f57b95",
+    "hash_digest_class": "OpenSSL::Digest::SHA1",
+    "derived_primary_key_hex": "40c823af6b936574dd802c5d0a4a806a3765b3a2ca9bbfca18e8231a0f682b46",
+    "values": {
+      "short": {
+        "plaintext": "https://example.com/webhook",
+        "ciphertext": "{\"p\":\"mPyyA9a6J0DDtAh0IpgkaRaQrlClHQbkEyUi\",\"h\":{\"iv\":\"9/WT3QDoaAG4C0YO\",\"at\":\"DIbrn9B/oNrJugZrgDeEdg==\"}}"
+      },
+      "empty": {
+        "plaintext": "",
+        "ciphertext": "{\"p\":\"\",\"h\":{\"iv\":\"Oa7A9aHPO9/JhAOX\",\"at\":\"R5ZtPQomEJJ7Ecpf9r5+BA==\"}}"
+      },
+      "unicode": {
+        "plaintext": "Grüße – 署名 ✍️",
+        "ciphertext": "{\"p\":\"MrToIWDmVGu/fgcpL7KXrK4zfjS4L8Kk3g==\",\"h\":{\"iv\":\"rqw61+TV2+731zeb\",\"at\":\"MXl59ifvPG2ajeApES5BJg==\"}}"
+      },
+      "long": {
+        "plaintext": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. ",
+        "ciphertext": "{\"p\":\"gA3dwj9ZKLHlCKmAWDLTTU8oAX67+RcoiRU0i+gGUOrfMBkJarUKkQt5ogjEwaHwb23pzrXRjdTdcuHZyY2Q2p1IA8ul\",\"h\":{\"iv\":\"GAhJTmdASUgRpJLg\",\"at\":\"6HIiUyNGta8UlK9zJ2+aqg==\",\"c\":true}}"
+      }
+    }
+  },
+  "signed_id": {
+    "secret_hex": "727535cdc978b67479ff420a6410c0e8363ca5539c17997a0996bc64df5355d64d04a0ec68199fab9df506adbfab31fa33016459b863b6d047e18f8204419f0c",
+    "values": {
+      "submitter_download_completed": {
+        "data": 42,
+        "purpose": "submitter/download_completed",
+        "message": "eyJfcmFpbHMiOnsiZGF0YSI6NDIsImV4cCI6IjIxMjYtMTEtMDZUMjM6NDY6NDUuOTM2WiIsInB1ciI6InN1Ym1pdHRlci9kb3dubG9hZF9jb21wbGV0ZWQifX0--e440534f3f9f1dc30ca98829ad55802a7c14b5b4903dff2d499f5c3b983fc511"
+      },
+      "attachment_uuid": {
+        "data": "b1c2d3e4-0000-4000-8000-000000000001",
+        "purpose": "attachment",
+        "message": "eyJfcmFpbHMiOnsiZGF0YSI6ImIxYzJkM2U0LTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImV4cCI6IjIxMjYtMTEtMDZUMjM6NDY6NDUuOTM2WiIsInB1ciI6ImF0dGFjaG1lbnQifX0--3103e156fd3364377bfa93446267badab866a6c225de7108673efac111ea693a"
+      },
+      "attachment_pair": {
+        "data": [
+          7,
+          "b1c2d3e4-0000-4000-8000-000000000001"
+        ],
+        "purpose": "attachment",
+        "message": "eyJfcmFpbHMiOnsiZGF0YSI6WzcsImIxYzJkM2U0LTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSJdLCJleHAiOiIyMTI2LTExLTA2VDIzOjQ2OjQ1LjkzNloiLCJwdXIiOiJhdHRhY2htZW50In19--261b17eab1fdedd9daff387b536766967c85d4944b2fb30f445f4f8c8dd8fb32"
+      },
+      "blob_proxy_no_purpose": {
+        "data": [
+          "b1c2d3e4-0000-4000-8000-000000000001",
+          "blob",
+          4102444800
+        ],
+        "purpose": null,
+        "message": "WyJiMWMyZDNlNC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJibG9iIiw0MTAyNDQ0ODAwXQ--a4687c737fbf334d94874f2cb182e2c3a1faeb4e84531d8f701a2a2bf12f1983"
+      },
+      "expired": {
+        "data": 1,
+        "purpose": "attachment",
+        "message": "eyJfcmFpbHMiOnsiZGF0YSI6MSwiZXhwIjoiMjAwMS0wMS0wMVQwMDowMDowMC4wMDBaIiwicHVyIjoiYXR0YWNobWVudCJ9fQ--c5eb7c2b97c7e8316bbb7c90b15456ff4110b2d5d341cfb5ee03f18157b07740"
+      }
+    }
+  },
+  "active_storage": {
+    "secret_hex": "994c4ecb584aea29cde1a35c388d80c05ca4b845e6768283b0ea42e3f5a72b2981ef05e1144d922a97c6241a335e7cc2de41e7903f421e252859357d51ef9339",
+    "blob_signed_id": {
+      "data": 7,
+      "purpose": "blob_id",
+      "message": "eyJfcmFpbHMiOnsiZGF0YSI6NywicHVyIjoiYmxvYl9pZCJ9fQ==--27686c0e840abbafe5212b300713744b3276b8a2"
+    }
+  },
+  "encrypted_config_smtp": {
+    "value": {
+      "host": "mail.example.test",
+      "port": "465",
+      "username": "contracts",
+      "password": "smtp-secret",
+      "from_email": "contracts@example.test"
+    },
+    "stored": "{\"p\":\"CAAswAj8wCvvd+qCCErrFQ/ofURHJA1LC2GfUNYcn9Jf+tjeUX+RiWGnEBClLxuij3jNH7ropCynTGcaqq+uWKeNwcqKI+AHO7HMq0TmwfaxsX2HlUKK7rbflWsQ/sWzoD4k/FftKWBGxBd+a2H6eA1g3JHZvkn/Md8EWWZEhA==\",\"h\":{\"iv\":\"iBWvh06cGgGMiMWE\",\"at\":\"Z4c/ud6Uo4lr0jhluiDdtg==\"}}"
+  },
+  "bcrypt": {
+    "password": "correct horse battery staple",
+    "hash": "$2a$10$zQz8yhbWa9hKI4L/2P.wXeaBLugvUJltr8UbxiHvXXgsmPYR7ccvy",
+    "pepper": null
+  }
+}
