@@ -1,0 +1,56 @@
+# Development services for the Rust backend rewrite (see rust/README.md).
+#
+#   docker compose -f compose.rust-dev.yml up -d postgres mailpit   # DB + mail only
+#   docker compose -f compose.rust-dev.yml up -d --build            # + Rails reference app
+#
+# The Rails service runs the existing migrations on boot, which creates the schema the
+# Rust code is checked against, and serves as the reference implementation for parity tests.
+name: loco-lokal-rust-dev
+
+services:
+  postgres:
+    image: postgres:18.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: docuseal
+      POSTGRES_PASSWORD: docuseal_dev
+      POSTGRES_DB: docuseal
+    ports:
+      - '127.0.0.1:5435:5432'
+    volumes:
+      - postgres:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U docuseal -d docuseal']
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
+
+  rails:
+    build: .
+    image: loco-lokal-docs:rust-dev-reference
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:3000:3000'
+    environment:
+      APP_URL: http://localhost:3000
+      DATABASE_URL: postgresql://docuseal:docuseal_dev@postgres:5432/docuseal
+      # Shared with the Rust server so encrypted columns and signed ids are interchangeable.
+      SECRET_KEY_BASE: rust-dev-secret-key-base-not-for-production-use-0123456789abcdef0123456789abcdef
+      SMTP_ADDRESS: mailpit
+      SMTP_PORT: '1025'
+    volumes:
+      - documents:/data/docuseal
+
+volumes:
+  documents:
+  postgres:

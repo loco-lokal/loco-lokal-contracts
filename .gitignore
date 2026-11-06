@@ -38,3 +38,7 @@ yarn-debug.log*
 /ee
 dump.rdb
 *.onnx
+
+# Rust backend
+/rust/target
+/rust/vendor

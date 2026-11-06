@@ -122,6 +122,14 @@ RSpec automatically loads `rails_helper` through `.rspec`. Tests use PostgreSQL,
 
 If prerequisites prevent execution, report the missing dependency and the checks left unrun. Do not describe source inspection as a passing application test.
 
+## Rust backend rewrite (`rust/`)
+
+A Rust replacement for the Rails backend is in progress under `rust/`. It is a Cargo workspace with `axum`, `sqlx` (PostgreSQL only), and `minijinja`. Setup, the dev services (`compose.rust-dev.yml`: Postgres on 5435, Mailpit, and Rails as the reference app), and the checks are documented in `rust/README.md`.
+
+- Rails migrations own the schema until cutover. After they change, regenerate `rust/schema/baseline.sql` (`rust/scripts/dump-schema.sh`) and `rust/.sqlx` (`cargo sqlx prepare --workspace`).
+- Rust code must stay compatible with Rails-produced data: the existing tables, the Active Storage layout, encrypted columns, signed ids, and Devise hashes.
+- CI runs the `Rust` job (fmt, clippy `-D warnings`, nextest, sqlx offline check, cargo-deny).
+
 ## Contribution conventions
 
 - Follow `.rubocop.yml`, `.erb_lint.yml`, and `.eslintrc`. Ruby files generally use `# frozen_string_literal: true`; JavaScript uses Standard style and the Vue 3 recommended rules.

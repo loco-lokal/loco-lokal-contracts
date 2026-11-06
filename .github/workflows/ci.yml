@@ -167,3 +167,60 @@ jobs:
           bundle exec rake db:migrate
           bundle exec rake assets:precompile
           bundle exec rspec
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: rust
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: docuseal_rust_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d docuseal_rust_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SQLX_OFFLINE: 'true'
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/docuseal_rust_test
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Install cargo-nextest and cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-deny
+      - name: Fetch pdfium
+        run: scripts/fetch-pdfium.sh
+      - name: Load baseline schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f schema/baseline.sql
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo nextest run --workspace
+      - name: Check sqlx offline data is current
+        run: cargo sqlx prepare --workspace --check || (cargo install sqlx-cli --no-default-features --features postgres,rustls --locked && cargo sqlx prepare --workspace --check)
+      - name: cargo-deny
+        run: cargo deny check
