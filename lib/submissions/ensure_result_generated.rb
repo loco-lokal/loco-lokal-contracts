@@ -42,7 +42,6 @@ module Submissions
 
       total_wait_time > CHECK_COMPLETE_TIMEOUT ? raise : retry
     rescue StandardError => e
-      Rollbar.error(e) if defined?(Rollbar)
       Rails.logger.error(e)
 
       LockEvent.create!(key:, event_name: :fail)

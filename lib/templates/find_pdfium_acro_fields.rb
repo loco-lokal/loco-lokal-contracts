@@ -59,7 +59,7 @@ module Templates
 
       group_widgets(widgets).filter_map { |field_widgets| build_field(field_widgets, pages, attachment) }
     rescue StandardError => e
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
 
       raise if Rails.env.development?
 

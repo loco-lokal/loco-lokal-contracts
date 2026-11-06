@@ -265,15 +265,11 @@ module Submitters
     RateLimit.call("send-otp-code-#{request.remote_ip}", limit: 2, ttl: 45.seconds, enabled: true)
 
     if Docuseal.multitenant? && email_bounced_recently?(submitter.email)
-      Rollbar.warning("Bounced OTP email for template: #{submitter.submission.template.id}") if defined?(Rollbar)
-
       raise BouncedEmail, I18n.t(:verification_email_bounced)
     end
 
     TemplateMailer.otp_verification_email(submitter.submission.template, email: submitter.email).deliver_later!
   rescue RateLimit::LimitApproached
-    Rollbar.warning("Limit verification code for template: #{submitter.submission.template.id}") if defined?(Rollbar)
-
     raise UnableToSendCode, I18n.t('too_many_attempts')
   end
 

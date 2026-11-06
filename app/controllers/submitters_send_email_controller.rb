@@ -9,7 +9,6 @@ class SubmittersSendEmailController < ApplicationController
     if Docuseal.multitenant? && SubmissionEvent.exists?(submitter: @submitter,
                                                         event_type: 'send_email',
                                                         created_at: 10.hours.ago..Time.current)
-      Rollbar.warning("Already sent: #{@submitter.id}") if defined?(Rollbar)
 
       return redirect_back(fallback_location: submission_path(@submitter.submission),
                            alert: I18n.t('email_has_been_sent_already'))

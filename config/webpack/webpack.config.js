@@ -14,7 +14,7 @@ const configs = generateWebpackConfig({
     concatenateModules: !process.env.BUNDLE_ANALYZE,
     splitChunks: {
       chunks (chunk) {
-        return chunk.name !== 'rollbar' && chunk.name !== 'dynamic-editor'
+        return chunk.name !== 'dynamic-editor'
       },
       cacheGroups: {
         default: false,

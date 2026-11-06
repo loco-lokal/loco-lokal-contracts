@@ -280,9 +280,7 @@
         :class="{'tooltip-bottom-end': withPayment, 'tooltip-bottom': !withPayment }"
         :data-tip="t('unlock_sms_verified_phone_number_field_with_paid_plan_use_text_field_for_phone_numbers_without_verification')"
       >
-        <a
-          href="https://www.docuseal.com/pricing"
-          target="_blank"
+        <div
           class="opacity-50 flex items-center justify-center border border-dashed border-base-300 w-full rounded relative fields-grid-item"
           :style="{ backgroundColor }"
         >
@@ -299,16 +297,14 @@
               {{ fieldNames[type] }}
             </span>
           </div>
-        </a>
+        </div>
       </div>
       <div
         v-else-if="withVerification === false && type == 'verification' && (fieldTypes.length === 0 || fieldTypes.includes(type))"
         class="tooltip tooltip-bottom flex tooltip-bottom-start"
         :data-tip="t('obtain_qualified_electronic_signature_with_the_trusted_provider_click_to_learn_more')"
       >
-        <a
-          href="https://www.docuseal.com/qualified-electronic-signature"
-          target="_blank"
+        <div
           class="opacity-50 flex items-center justify-center border border-dashed border-base-300 w-full rounded relative fields-grid-item"
           :style="{ backgroundColor }"
         >
@@ -325,7 +321,7 @@
               {{ fieldNames[type] }}
             </span>
           </div>
-        </a>
+        </div>
       </div>
     </template>
   </div>

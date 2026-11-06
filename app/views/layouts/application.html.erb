@@ -9,12 +9,7 @@
     <%= csrf_meta_tags %>
     <meta name="turbo-refresh-method" content="morph">
     <meta name="turbo-refresh-scroll" content="preserve">
-    <% if ENV['ROLLBAR_CLIENT_TOKEN'] %>
-      <meta name="rollbar-token" content="<%= ENV.fetch('ROLLBAR_CLIENT_TOKEN', nil) %>">
-      <%= javascript_pack_tag 'rollbar', 'application', defer: true %>
-    <% else %>
-      <%= javascript_pack_tag 'application', defer: true %>
-    <% end %>
+    <%= javascript_pack_tag 'application', defer: true %>
     <% if canonical_url = content_for(:canonical_url) %>
       <link href="<%= canonical_url %>" rel="canonical">
     <% end %>

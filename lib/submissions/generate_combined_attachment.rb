@@ -47,11 +47,11 @@ module Submissions
     def sign_pdf(io, pdf, sign_params)
       pdf.sign(io, **sign_params)
     rescue HexaPDF::MalformedPDFError, NoMethodError => e
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
 
       pdf.sign(io, write_options: { incremental: false }, **sign_params)
     rescue HexaPDF::Error => e
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
 
       pdf.validate(auto_correct: true)
 

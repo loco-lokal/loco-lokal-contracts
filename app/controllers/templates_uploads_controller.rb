@@ -35,7 +35,7 @@ class TemplatesUploadsController < ApplicationController
   rescue Templates::CreateAttachments::PdfEncrypted
     render turbo_stream: turbo_stream.append(params[:form_id], html: helpers.tag.prompt_password)
   rescue StandardError => e
-    Rollbar.error(e) if defined?(Rollbar)
+    Rails.logger.error(e)
 
     raise if Rails.env.local?
 

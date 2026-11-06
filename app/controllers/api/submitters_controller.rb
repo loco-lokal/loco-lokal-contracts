@@ -80,7 +80,6 @@ module Api
                                                                 with_events: false, params:)
     rescue Submitters::NormalizeValues::BaseError, Submitters::SubmitValues::ValidationError,
            DownloadUtils::UnableToDownload => e
-      Rollbar.warning(e) if defined?(Rollbar)
 
       render json: { error: e.message }, status: :unprocessable_content
     end

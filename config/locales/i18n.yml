@@ -333,7 +333,6 @@ en: &en
   code_is_invalid: Code is invalid
   2fa_has_been_removed: 2FA has been removed.
   2fa_has_been_set_up_already: 2FA has been set up already.
-  developer_newsletters: Developer Newsletters
   skip: Skip
   email_notifications: Email Notifications
   receive_notification_emails_on_completed_submission: Receive notification emails on completed submission
@@ -1487,7 +1486,6 @@ es: &es
   code_is_invalid: El código no es válido
   2fa_has_been_removed: 2FA ha sido eliminado.
   2fa_has_been_set_up_already: 2FA ya ha sido configurado.
-  developer_newsletters: Boletines para desarrolladores
   skip: Omitir
   email_notifications: Notificaciones por correo electrónico
   receive_notification_emails_on_completed_submission: Recibir notificaciones por correo electrónico sobre formularios completados
@@ -2651,7 +2649,6 @@ it: &it
   code_is_invalid: Il codice non è valido
   2fa_has_been_removed: 2FA è stata rimossa.
   2fa_has_been_set_up_already: 2FA è già stata configurata.
-  developer_newsletters: Newsletter per sviluppatori
   skip: Salta
   email_notifications: Notifiche email
   receive_notification_emails_on_completed_submission: Ricevi notifiche email su moduli completati
@@ -3801,7 +3798,6 @@ fr: &fr
   code_is_invalid: Le code est invalide
   2fa_has_been_removed: La 2FA a été supprimée.
   2fa_has_been_set_up_already: La 2FA est déjà configurée.
-  developer_newsletters: Newsletters développeur
   skip: Ignorer
   email_notifications: Notifications par e‑mail
   receive_notification_emails_on_completed_submission: Recevoir des e‑mails de notification lors de la finalisation d’une soumission
@@ -4961,7 +4957,6 @@ pt: &pt
   code_is_invalid: O código é inválido
   2fa_has_been_removed: 2FA foi removido.
   2fa_has_been_set_up_already: 2FA já foi configurado.
-  developer_newsletters: Newsletters para desenvolvedores
   skip: Pular
   email_notifications: Notificações por e-mail
   receive_notification_emails_on_completed_submission: Receber notificações por e-mail ao concluir uma submissão
@@ -6124,7 +6119,6 @@ de: &de
   code_is_invalid: Der Code ist ungültig
   2fa_has_been_removed: 2FA wurde entfernt.
   2fa_has_been_set_up_already: 2FA wurde bereits eingerichtet.
-  developer_newsletters: Entwickler-Newsletter
   skip: Überspringen
   email_notifications: E-Mail-Benachrichtigungen
   receive_notification_emails_on_completed_submission: Benachrichtigungs-E-Mails bei abgeschlossener Einreichung erhalten
@@ -7815,7 +7809,6 @@ nl: &nl
   code_is_invalid: Code is ongeldig
   2fa_has_been_removed: 2FA is verwijderd.
   2fa_has_been_set_up_already: 2FA is al ingesteld.
-  developer_newsletters: Nieuwsbrieven voor ontwikkelaars
   skip: Overslaan
   email_notifications: E-mailmeldingen
   receive_notification_emails_on_completed_submission: Ontvang e-mailmeldingen bij voltooide inzendingen

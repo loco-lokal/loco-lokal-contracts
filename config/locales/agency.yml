@@ -4,9 +4,11 @@ en:
     workspace: Your contract workspace
     page_title: Loco Lokal | Contracts
     description: Review, sign and manage your contracts with Loco Lokal.
+    source_code: Source code
 de:
   agency:
     contracts: Verträge
     workspace: Ihr Vertragsbereich
     page_title: Loco Lokal | Verträge
     description: Verträge mit Loco Lokal prüfen, unterschreiben und verwalten.
+    source_code: Quellcode

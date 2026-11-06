@@ -59,7 +59,7 @@ class EsignSettingsController < ApplicationController
 
     redirect_to settings_esign_path, notice: I18n.t('certificate_has_been_successfully_added')
   rescue OpenSSL::PKCS12::PKCS12Error => e
-    Rollbar.error(e) if defined?(Rollbar)
+    Rails.logger.error(e)
 
     @cert_record.errors.add(:password, e.message)
 

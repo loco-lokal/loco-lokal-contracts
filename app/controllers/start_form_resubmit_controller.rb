@@ -70,7 +70,9 @@ class StartFormResubmitController < ApplicationController
 
   def multiple_submitters_error_message
     if current_user&.account_id == @template.account_id
-      helpers.t('this_submission_has_multiple_signers_which_prevents_the_use_of_a_sharing_link_html')
+      helpers.strip_links(
+        helpers.t('this_submission_has_multiple_signers_which_prevents_the_use_of_a_sharing_link_html')
+      )
     else
       I18n.t('not_found')
     end

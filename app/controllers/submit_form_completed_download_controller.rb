@@ -14,11 +14,7 @@ class SubmitFormCompletedDownloadController < ApplicationController
 
     @submitter = Submitter.find_by!(slug: submitter_slug) unless signature_valid
 
-    unless completed_submitter?(@submitter)
-      Rollbar.error("Not completed: #{@submitter.id}") if defined?(Rollbar)
-
-      return head :not_found
-    end
+    return head :not_found unless completed_submitter?(@submitter)
 
     Submissions::EnsureResultGenerated.call(@submitter) if @submitter.completed_at?
 
@@ -33,11 +29,7 @@ class SubmitFormCompletedDownloadController < ApplicationController
         return head :not_found
       end
 
-      if last_submitter.completed_at < TTL.ago
-        Rollbar.info("TTL: #{last_submitter.id}") if defined?(Rollbar)
-
-        return head :not_found
-      end
+      return head :not_found if last_submitter.completed_at < TTL.ago
     end
 
     if params[:combined] == 'true'

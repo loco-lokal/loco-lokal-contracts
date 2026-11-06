@@ -72,22 +72,14 @@ class SubmitFormController < ApplicationController
                     status: :unprocessable_content
     end
 
-    if @submitter.viewer?
-      Rollbar.warning("Submit viewer: #{@submitter.id}") if defined?(Rollbar)
-
-      return render json: { error: I18n.t('form_is_view_only') }, status: :unprocessable_content
-    end
+    return render json: { error: I18n.t('form_is_view_only') }, status: :unprocessable_content if @submitter.viewer?
 
     Submitters::SubmitValues.call(@submitter, params, request)
 
     head :ok
   rescue Submitters::SubmitValues::RequiredFieldError => e
-    Rollbar.warning("Required field #{@submitter.id}: #{e.message}") if defined?(Rollbar)
-
     render json: { field_uuid: e.message }, status: :unprocessable_content
   rescue Submitters::SubmitValues::ValidationError => e
-    Rollbar.warning("Validation error #{@submitter.id}: #{e.message}") if defined?(Rollbar)
-
     render json: { error: e.message }, status: :unprocessable_content
   end
 

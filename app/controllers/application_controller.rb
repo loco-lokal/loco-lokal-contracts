@@ -32,15 +32,13 @@ class ApplicationController < ActionController::Base
   end
 
   rescue_from RateLimit::LimitApproached do |e|
-    Rollbar.error(e) if defined?(Rollbar)
+    Rails.logger.error(e)
 
     redirect_back_or_to root_path, alert: 'Too many requests'
   end
 
   if Rails.env.production? || Rails.env.test?
     rescue_from CanCan::AccessDenied do |e|
-      Rollbar.warning(e) if defined?(Rollbar)
-
       redirect_to root_path, alert: e.message
     end
   end

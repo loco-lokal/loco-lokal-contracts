@@ -13,8 +13,6 @@ class SessionsController < Devise::SessionsController
     email = sign_in_params[:email].to_s.downcase
 
     if Docuseal.multitenant? && !User.exists?(email:)
-      Rollbar.warning('Sign in new user') if defined?(Rollbar)
-
       respond_to do |format|
         format.html do
           redirect_to new_registration_path(sign_up: true, user: sign_in_params.slice(:email)),
@@ -43,11 +41,7 @@ class SessionsController < Devise::SessionsController
   private
 
   def after_sign_in_path_for(...)
-    if params[:redir].present?
-      return console_redirect_index_path(redir: params[:redir]) if params[:redir].starts_with?(Docuseal::CONSOLE_URL)
-
-      return params[:redir]
-    end
+    return params[:redir] if params[:redir].present?
 
     super
   end

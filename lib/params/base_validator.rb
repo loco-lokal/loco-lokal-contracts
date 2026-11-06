@@ -11,11 +11,9 @@ module Params
 
       validator.call
     rescue InvalidParameterError => e
-      Rollbar.warning(e) if defined?(Rollbar)
-
       raise e unless validator.dry_run?
     rescue StandardError => e
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
 
       raise e unless Rails.env.production?
     end

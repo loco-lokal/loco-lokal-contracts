@@ -8,9 +8,9 @@
             DocuSeal
           </h1>
           <% if Docuseal.version.present? %>
-            <a href="https://github.com/docusealco/docuseal/releases" target="_blank" class="badge badge-outline badge-lg block mx-auto">
+            <span class="badge badge-outline badge-lg block mx-auto">
               v<%= Docuseal.version %>
-            </a>
+            </span>
           <% end %>
         </div>
         <h2 class="mt-4 mb-16 text-lg text-center text-gray-600">
@@ -27,7 +27,7 @@
             </div>
             <h3 class="mb-4 text-2xl font-semibold">Easy to Start</h3>
             <p class="text-base text-gray-500">
-              Run on your own host using Docker container, or deploy on  your favorite managed PaaS with a single <a href="https://www.docuseal.com/install" class="link link-neutral font-bold">click</a>.
+              Run on your own host using Docker container, or deploy on  your favorite managed PaaS with a single click.
             </p>
           </div>
         </div>
@@ -67,7 +67,7 @@
             </div>
             <h3 class="mb-4 text-2xl font-semibold">Open Source</h3>
             <p class="text-base text-gray-500">
-              Source code is available under <a href="<%= Docuseal::GITHUB_URL %>" class="link link-neutral font-bold" target="_blank">github.com/docusealco</a>.<br>
+              Source code is available under the AGPLv3 license on <a href="<%= Docuseal::SOURCE_CODE_URL %>" class="link link-neutral font-bold" target="_blank" rel="noopener noreferrer">GitHub</a>.<br>
               Open-source contributors are always ready to help!
             </p>
           </div>

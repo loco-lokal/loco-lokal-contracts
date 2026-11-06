@@ -98,8 +98,6 @@ module Submitters
         if validate_required || submitter.submission.fields_uuid_index.dig(uuid, 'type').in?(REQUIRED_FIELD_TYPES)
           raise RequiredFieldError, uuid
         end
-
-        Rollbar.warning("Required field #{submitter.id}: #{uuid}") if defined?(Rollbar)
       end
 
       submitter
@@ -511,11 +509,7 @@ module Submitters
       raise ValidationError, 'Missing field' unless field
       raise ValidationError, 'Invalid field' if field['submitter_uuid'] != submitter.uuid
 
-      if field['readonly'] == true
-        Rollbar.warning("Readonly field #{submitter.id}: #{field['uuid']}") if defined?(Rollbar)
-
-        raise ValidationError, 'Read-only field'
-      end
+      raise ValidationError, 'Read-only field' if field['readonly'] == true
 
       raise ValidationError, 'Value is invalid' if field['type'] == 'checkbox' && !value.in?(BOOLEAN_VALUES)
 

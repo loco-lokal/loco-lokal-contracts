@@ -3,29 +3,11 @@
 module Docuseal
   PRODUCT_URL = 'https://www.docuseal.com'
   PRODUCT_EMAIL_URL = ENV.fetch('PRODUCT_EMAIL_URL', PRODUCT_URL)
-  NEWSLETTER_URL = "#{PRODUCT_URL}/newsletters".freeze
   PRODUCT_NAME = 'DocuSeal'
+  SOURCE_CODE_URL = ENV.fetch('SOURCE_CODE_URL', 'https://github.com/loco-lokal/loco-lokal-contracts')
   DEFAULT_APP_URL = ENV.fetch('APP_URL', 'http://localhost:3000')
-  GITHUB_URL = 'https://github.com/docusealco/docuseal'
-  DISCORD_URL = 'https://discord.gg/qygYCDGck9'
-  TWITTER_URL = 'https://twitter.com/docusealco'
-  TWITTER_HANDLE = '@docusealco'
-  CHATGPT_URL = "#{PRODUCT_URL}/chat".freeze
-  SUPPORT_EMAIL = 'support@docuseal.com'
   HOST = ENV.fetch('HOST', 'localhost')
   AATL_CERT_NAME = 'docuseal_aatl'
-  CONSOLE_URL = if Rails.env.development?
-                  'http://console.localhost.io:3001'
-                elsif ENV['MULTITENANT'] == 'true'
-                  "https://console.#{HOST}"
-                else
-                  'https://console.docuseal.com'
-                end
-  CLOUD_URL = if Rails.env.development?
-                'http://localhost:3000'
-              else
-                'https://docuseal.com'
-              end
   CDN_URL = if Rails.env.development?
               'http://localhost:3000'
             elsif ENV['MULTITENANT'] == 'true'

@@ -36,8 +36,6 @@ class SubmitFormEmail2fasController < ApplicationController
     RateLimit.call("send-email-code-#{@submitter.id}", limit: 2, ttl: 45.seconds, enabled: true)
 
     if Docuseal.multitenant? && Submitters.email_bounced_recently?(@submitter.email)
-      Rollbar.warning("Bounced OTP email for submitter: #{@submitter.id}") if defined?(Rollbar)
-
       return redirect_to submit_form_path(@submitter.slug, status: :error), alert: I18n.t(:verification_email_bounced)
     end
 

@@ -951,10 +951,6 @@ export default {
         if (this.field.required === true || this.pad.toData().length > 0) {
           if (isCanvasBlocked()) {
             alert(this.t('browser_privacy_settings_block_canvas'))
-
-            if (window.Rollbar) {
-              window.Rollbar.info('Canvas blocked')
-            }
           } else {
             alert(this.t('signature_is_too_small_or_simple_please_redraw'))
           }
@@ -1026,10 +1022,6 @@ export default {
           if (this.field.required === true) {
             if (isCanvasBlocked()) {
               alert(this.t('browser_privacy_settings_block_canvas'))
-
-              if (window.Rollbar) {
-                window.Rollbar.info('Canvas blocked')
-              }
             } else {
               alert(this.t('signature_is_too_small_or_simple_please_redraw'))
             }

@@ -16,14 +16,10 @@ class SubmitFormUploadController < ActionController::API
       image = ImageUtils.load_vips(file.read, content_type: file.content_type)
 
       if ImageUtils.blank?(image)
-        Rollbar.error("Empty signature: #{@submitter.id}") if defined?(Rollbar)
-
         return render json: { error: "#{params[:type]} is empty" }, status: :unprocessable_content
       end
 
       if ImageUtils.error?(image)
-        Rollbar.error("Error signature: #{@submitter.id}") if defined?(Rollbar)
-
         return render json: { error: "#{params[:type]} error, try to sign on another device" },
                       status: :unprocessable_content
       end
@@ -39,7 +35,7 @@ class SubmitFormUploadController < ActionController::API
 
     render json: attachment.as_json(only: %i[uuid created_at], methods: %i[url filename content_type])
   rescue Submitters::MaliciousFileExtension => e
-    Rollbar.error(e) if defined?(Rollbar)
+    Rails.logger.error(e)
 
     render json: { error: e.message }, status: :unprocessable_content
   end

@@ -31,8 +31,6 @@ class SubmissionsPreviewController < ApplicationController
     end
 
     if use_signature?(@submission) && !signature_valid
-      Rollbar.info("TTL: #{@submission.id}") if defined?(Rollbar)
-
       return redirect_to submissions_preview_completed_path(@submission.slug)
     end
 

@@ -295,7 +295,7 @@ module Submissions
             begin
               page.flatten_annotations
             rescue StandardError => e
-              Rollbar.error(e) if defined?(Rollbar)
+              Rails.logger.error(e)
             end
           end
 
@@ -578,8 +578,6 @@ module Submissions
 
                   Array.wrap(value).include?(option_name)
                 else
-                  Rollbar.error("Invalid option: #{field['uuid']}") if defined?(Rollbar)
-
                   false
                 end
             end
@@ -787,7 +785,7 @@ module Submissions
         begin
           pdf.sign(io, write_options: { validate: false }, **sign_params)
         rescue HexaPDF::Error, NoMethodError, TypeError => e
-          Rollbar.error(e) if defined?(Rollbar)
+          Rails.logger.error(e)
 
           pdf.instance_variable_get(:@listeners)[:complete_objects].delete(pdfa_listener) if pdfa_listener
 
@@ -804,7 +802,7 @@ module Submissions
         begin
           pdf.write(io, incremental: true, validate: false)
         rescue HexaPDF::Error, NoMethodError => e
-          Rollbar.error(e) if defined?(Rollbar)
+          Rails.logger.error(e)
 
           begin
             pdf.write(io, incremental: false, validate: false)
@@ -891,7 +889,7 @@ module Submissions
     rescue HexaPDF::MissingGlyphError
       nil
     rescue StandardError => e
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
     end
 
     def maybe_rotate_pdf(pdf, incremental: false)
@@ -913,7 +911,7 @@ module Submissions
 
       HexaPDF::Document.new(io:)
     rescue StandardError => e
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
 
       pdf
     end
@@ -955,7 +953,7 @@ module Submissions
 
       pdf
     rescue StandardError => e
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
 
       io.rewind
 
@@ -963,8 +961,6 @@ module Submissions
     end
 
     def on_missing_glyph(character, font_wrapper)
-      Rails.logger.info("Missing glyph: #{character}") if character.present? && defined?(Rollbar)
-
       replace_with =
         if font_wrapper.font_type == :Type1
           MISSING_GLYPH_REPLACE_TYPE1[character] || :space

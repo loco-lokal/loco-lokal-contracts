@@ -20,7 +20,7 @@ module Api
     end
 
     rescue_from RateLimit::LimitApproached do |e|
-      Rollbar.error(e) if defined?(Rollbar)
+      Rails.logger.error(e)
 
       render json: { error: 'Too many requests' }, status: :too_many_requests
     end
@@ -31,8 +31,6 @@ module Api
       end
 
       rescue_from JSON::ParserError do |e|
-        Rollbar.warning(e) if defined?(Rollbar)
-
         render json: { error: "JSON parse error: #{e.message}" }, status: :unprocessable_content
       end
     end

@@ -22,8 +22,6 @@ class StartFormController < ApplicationController
                                             uuid: Submitters::StartForm.first_submitter_uuid(@template))
       render :email_verification if params[:email_verification]
     else
-      Rollbar.warning("Not shared template: #{@template.id}") if defined?(Rollbar)
-
       return render :private if current_user && current_ability.can?(:read, @template)
 
       raise ActionController::RoutingError, I18n.t('not_found')
@@ -123,8 +121,6 @@ class StartFormController < ApplicationController
 
     return if @template.shared_link? || (current_user && current_ability.can?(:read, @template))
 
-    Rollbar.warning("Not shared template: #{@template.id}") if defined?(Rollbar)
-
     redirect_to start_form_path(@template.slug)
   end
 
@@ -140,7 +136,9 @@ class StartFormController < ApplicationController
 
   def multiple_submitters_error_message
     if current_user&.account_id == @template.account_id
-      helpers.t('this_submission_has_multiple_signers_which_prevents_the_use_of_a_sharing_link_html')
+      helpers.strip_links(
+        helpers.t('this_submission_has_multiple_signers_which_prevents_the_use_of_a_sharing_link_html')
+      )
     else
       I18n.t('not_found')
     end
@@ -152,10 +150,6 @@ class StartFormController < ApplicationController
     if Submitters::StartForm.verify_2fa_and_save_submitter(submitter, request, is_new_record: submitter.new_record?)
       redirect_to submit_form_path(submitter.slug)
     else
-      if defined?(Rollbar) && template.preferences['shared_link_2fa'] != true
-        Rollbar.info("2FA link requested: #{submitter.id}")
-      end
-
       Submitters.send_shared_link_email_verification_code(submitter, request:)
 
       render :email_verification

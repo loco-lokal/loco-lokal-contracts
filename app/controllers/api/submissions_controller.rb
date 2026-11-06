@@ -99,7 +99,6 @@ module Api
       render json: build_create_json(submissions)
     rescue Submitters::NormalizeValues::BaseError, Submissions::CreateFromSubmitters::BaseError,
            Submitters::SubmitValues::ValidationError, DownloadUtils::UnableToDownload => e
-      Rollbar.warning(e) if defined?(Rollbar)
 
       render json: { error: e.message }, status: :unprocessable_content
     end
@@ -160,14 +159,10 @@ module Api
       return render json: { error: 'Template not found' }, status: :unprocessable_content if @template.nil?
 
       if @template.archived_at?
-        Rollbar.warning("Archived template submission: #{@template.id}") if defined?(Rollbar)
-
         return render json: { error: 'Template has been archived' }, status: :unprocessable_content
       end
 
       return if @template.fields.present?
-
-      Rollbar.warning("Template does not contain fields: #{@template.id}") if defined?(Rollbar)
 
       render json: { error: 'Template does not contain fields' }, status: :unprocessable_content
     end
