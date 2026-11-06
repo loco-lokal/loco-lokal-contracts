@@ -2,26 +2,36 @@ name: Build Docker Images
 
 on:
   push:
-    tags:
-      - "*.*.*"
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/loco-lokal/loco-lokal-contracts
 
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         submodules: recursive
 
     - name: Docker meta
       id: meta
-      uses: docker/metadata-action@v4
+      uses: docker/metadata-action@v5
       with:
-        images: docuseal/docuseal
-        tags: type=semver,pattern={{version}}
+        images: ${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=latest
+          type=sha,format=long,prefix=
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
@@ -30,15 +40,14 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Create .version file
-      env:
-        REF_NAME: ${{ github.ref_name }}
-      run: echo "$REF_NAME" > .version
+      run: echo "${GITHUB_SHA::7}" > .version
 
-    - name: Login to Docker Hub
+    - name: Login to GitHub Container Registry
       uses: docker/login-action@v3
       with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build and push Docker image
       uses: docker/build-push-action@v6
@@ -47,3 +56,4 @@ jobs:
         push: true
         platforms: linux/amd64,linux/arm64
         tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
