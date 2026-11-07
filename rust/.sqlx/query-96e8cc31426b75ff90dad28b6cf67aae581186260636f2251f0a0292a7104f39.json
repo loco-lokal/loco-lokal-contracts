@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO email_events\n             (account_id, tag, message_id, emailable_type, emailable_id, event_type, email, data,\n              event_datetime, created_at)\n           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, (now() AT TIME ZONE 'utc'),\n                   (now() AT TIME ZONE 'utc'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "96e8cc31426b75ff90dad28b6cf67aae581186260636f2251f0a0292a7104f39"
+}

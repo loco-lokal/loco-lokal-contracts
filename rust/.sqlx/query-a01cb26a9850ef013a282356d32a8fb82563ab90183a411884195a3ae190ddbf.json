@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM active_storage_variant_records WHERE blob_id = $1\n               AND NOT EXISTS (SELECT 1 FROM active_storage_attachments WHERE blob_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a01cb26a9850ef013a282356d32a8fb82563ab90183a411884195a3ae190ddbf"
+}

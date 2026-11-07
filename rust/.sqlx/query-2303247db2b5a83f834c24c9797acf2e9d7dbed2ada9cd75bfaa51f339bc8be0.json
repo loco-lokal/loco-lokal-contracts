@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.value AS \"value!\" FROM account_configs c\n           WHERE c.key = $2 AND c.account_id IN ($1, (SELECT id FROM accounts ORDER BY id LIMIT 1))\n           ORDER BY (c.account_id = $1) DESC, c.id LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "account_configs",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2303247db2b5a83f834c24c9797acf2e9d7dbed2ada9cd75bfaa51f339bc8be0"
+}

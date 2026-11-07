@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE templates SET archived_at = (now() AT TIME ZONE 'utc'),\n                                updated_at = (now() AT TIME ZONE 'utc')\n           WHERE id = $1 RETURNING archived_at AS \"archived_at!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "archived_at!",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "archived_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "5100dca08f5463b2c01f586476e02bf43280ff58816f772cb46379962c4d4fd8"
+}

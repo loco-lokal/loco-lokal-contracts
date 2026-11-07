@@ -1,0 +1,232 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO templates\n             (name, slug, schema, fields, submitters, author_id, account_id, source, folder_id,\n              external_id, preferences, shared_link, variables_schema, created_at, updated_at)\n           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,\n                   (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           RETURNING id, slug, name, schema AS \"schema: JsonText\", fields AS \"fields: JsonText\",\n                     submitters AS \"submitters: JsonText\", author_id, account_id, archived_at,\n                     created_at, updated_at, source, folder_id, external_id,\n                     preferences AS \"preferences: JsonText\", shared_link,\n                     variables_schema AS \"variables_schema: JsonText\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "schema: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "schema"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "fields: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "fields"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "submitters: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "submitters"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "archived_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "archived_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "source",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "folder_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "folder_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "external_id",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "preferences: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "preferences"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "shared_link",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "shared_link"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "variables_schema: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "variables_schema"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8",
+        "Varchar",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "dd959052933f0c8c888c4a84d5567aeb710f1b6a91578cdabd9c4da7a7dd8c57"
+}

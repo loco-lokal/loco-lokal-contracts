@@ -1,0 +1,288 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE submitters SET\n             email = $2, name = $3, phone = $4, external_id = $5, values = $6, metadata = $7,\n             preferences = $8, sent_at = $9,\n             updated_at = CASE\n               WHEN (email, name, phone, external_id, values, metadata, preferences, sent_at)\n                    IS NOT DISTINCT FROM\n                    ($2::varchar, $3::varchar, $4::varchar, $5::varchar, $6::text, $7::text,\n                     $8::text, $9::timestamp)\n               THEN updated_at ELSE (now() AT TIME ZONE 'utc') END\n           WHERE id = $1\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "submission_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "submission_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "uuid",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "uuid"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "email",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "email"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "slug",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "values: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "values"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "ua",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "ua"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "ip",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "ip"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "sent_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "sent_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "opened_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "opened_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "completed_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "phone",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "phone"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "external_id",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "preferences: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "preferences"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "metadata: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "declined_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "declined_at"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "timezone",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "timezone"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "template_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "template_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "4664e373c13d46a291823456208dbd509b770fc7f9201556e85a1e4aab4e0f97"
+}

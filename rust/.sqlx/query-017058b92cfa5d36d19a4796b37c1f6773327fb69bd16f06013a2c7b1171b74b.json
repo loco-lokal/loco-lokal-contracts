@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.id FROM template_folders f\n                 WHERE f.account_id = $1 AND f.name = $3\n                   AND f.parent_folder_id IS NOT DISTINCT FROM (\n                     SELECT p.id FROM template_folders p\n                     WHERE p.account_id = $1 AND p.parent_folder_id IS NULL AND p.name = $2\n                     ORDER BY p.id LIMIT 1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "template_folders",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "017058b92cfa5d36d19a4796b37c1f6773327fb69bd16f06013a2c7b1171b74b"
+}

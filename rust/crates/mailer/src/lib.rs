@@ -34,6 +34,8 @@ pub enum MailerError {
     Smtp(#[from] lettre::transport::smtp::Error),
     #[error("invalid SMTP configuration: {0}")]
     Config(String),
+    #[error("invalid header name {0:?}")]
+    InvalidHeader(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,8 +75,7 @@ pub enum Delivery {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SenderOverride {
-    /// `SMTP_FROM` candidates; a full `Name <email>` replaces the whole sender, a bare
-    /// address only replaces the email part.
+    /// `SMTP_FROM` candidates, one picked per message; it replaces the whole sender.
     Env(Vec<String>),
     /// Account SMTP settings: `"<account name>" <from_email>`.
     Fixed(String),
@@ -190,6 +191,19 @@ pub struct Email {
     /// Plain-text part; generated from `html` when absent (`HtmlToPlainTextInterceptor`).
     pub text: Option<String>,
     pub attachments: Vec<EmailAttachment>,
+    /// Extra headers such as `X-Message-Uuid`.
+    pub headers: Vec<(String, String)>,
+}
+
+/// What a delivery did, for `EmailEvent` records (`ActionMailerEventsObserver`).
+#[derive(Clone, Debug)]
+pub struct Delivered {
+    /// `mail.from`: the sender addresses.
+    pub from: Vec<String>,
+    /// `mail.to + mail.cc + mail.bcc`: the recipient addresses.
+    pub to: Vec<String>,
+    /// `mail.delivery_method.class.name.underscore`.
+    pub method: &'static str,
 }
 
 #[derive(Clone, Debug)]
@@ -248,6 +262,14 @@ impl Mailer {
         if let Some(reply_to) = &email.reply_to {
             builder = builder.reply_to(parse_mailbox(reply_to)?);
         }
+        for (name, value) in &email.headers {
+            let name = lettre::message::header::HeaderName::new_from_ascii(name.clone())
+                .map_err(|_| MailerError::InvalidHeader(name.clone()))?;
+            builder = builder.raw_header(lettre::message::header::HeaderValue::new(
+                name,
+                value.clone(),
+            ));
+        }
 
         let text = email
             .text
@@ -273,18 +295,38 @@ impl Mailer {
         Ok(message)
     }
 
-    pub async fn deliver(&self, email: &Email) -> Result<(), MailerError> {
+    pub async fn deliver(&self, email: &Email) -> Result<Delivered, MailerError> {
         let message = self.build(email)?;
+        let from = message
+            .envelope()
+            .from()
+            .map(|a| vec![a.to_string()])
+            .unwrap_or_default();
+        let to = message
+            .envelope()
+            .to()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
 
         if let Some(transport) = &self.transport {
             transport.send(message).await?;
+            Ok(Delivered {
+                from,
+                to,
+                method: "mail/smtp",
+            })
         } else {
             tracing::warn!(
                 subject = email.subject,
                 "no SMTP configured; email discarded"
             );
+            Ok(Delivered {
+                from,
+                to,
+                method: "mail/test_mailer",
+            })
         }
-        Ok(())
     }
 }
 
@@ -333,25 +375,13 @@ fn resolve_from(from: &str, rule: &SenderOverride) -> String {
     match rule {
         SenderOverride::None => from.to_owned(),
         SenderOverride::Fixed(sender) => sender.clone(),
-        SenderOverride::Env(candidates) => {
-            let Some(candidate) = candidates.choose(&mut rand::rng()) else {
-                return from.to_owned();
-            };
-            if candidate.contains('<') {
-                // FULL_EMAIL_REGEXP: keep the original display name, swap in the address.
-                let address = candidate
-                    .split('<')
-                    .nth(1)
-                    .and_then(|s| s.split('>').next())
-                    .unwrap_or(candidate);
-                match from.split_once('<') {
-                    Some((name, _)) => format!("{name}<{address}>"),
-                    None => address.to_owned(),
-                }
-            } else {
-                candidate.clone()
-            }
-        }
+        // `ActionMailerConfigsInterceptor`: a bare address replaces the sender. A full
+        // `Name <address>` is substituted for the sender's address, which Mail then parses
+        // back as that full value, so the configured name replaces the sender's name too.
+        SenderOverride::Env(candidates) => candidates
+            .choose(&mut rand::rng())
+            .cloned()
+            .unwrap_or_else(|| from.to_owned()),
     }
 }
 
@@ -432,7 +462,7 @@ mod tests {
                 "Loco Lokal <noreply@x.test>",
                 &env("Other <contracts@example.com>")
             ),
-            "Loco Lokal <contracts@example.com>"
+            "Other <contracts@example.com>"
         );
     }
 

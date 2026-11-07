@@ -1,17 +1,25 @@
 //! HTTP server replacing the Rails application.
 
+pub mod api;
 pub mod auth;
 pub mod config;
+pub mod email_variables;
 pub mod errors;
+pub mod files;
 pub mod forms;
 pub mod locale;
+pub mod mail;
+pub mod markdown;
 pub mod page;
+pub mod purge;
 pub mod rate_limit;
 pub mod request;
 pub mod routes;
+pub mod search;
 pub mod session;
 pub mod state;
 pub mod validation;
+pub mod webhooks;
 
 use std::{convert::Infallible, path::Path};
 
@@ -35,6 +43,10 @@ pub type JobContext = AppState;
 #[must_use]
 pub fn job_registry() -> loco_jobs::Registry<JobContext> {
     loco_jobs::Registry::default()
+        .register::<webhooks::SendWebhook>()
+        .register::<purge::PurgeBlobs>()
+        .register::<search::ReindexSearchEntry>()
+        .register::<mail::SendInvitation>()
 }
 
 /// The application. Like Rails' `ActionDispatch::Static`, files in `public/` are served

@@ -1,0 +1,18 @@
+{#- Port of app/views/submitter_mailer/invitation_view_email.html.erb -#}
+{% extends "layouts/mailer.html" %}
+{% block content %}
+{%- if custom_body %}
+{{ custom_body | safe }}
+{%- if show_link %}
+<p><a href="{{ link }}">{{ link }}</a></p>
+{%- endif %}
+{%- else %}
+<p>{{ t('hi_there') }},</p>
+<p>{{ t('you_have_been_invited_to_view_the_name', name=name) }}</p>
+<p><a href="{{ link }}">{{ t('view_document') }}</a></p>
+<p>{{ t('please_contact_us_by_replying_to_this_email_if_you_have_any_questions') }}</p>
+<p>
+{{ t('thanks') }},<br>{{ account_name }}
+</p>
+{%- endif %}
+{% endblock %}

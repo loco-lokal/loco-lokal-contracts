@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM email_events WHERE emailable_type = 'Submitter' AND emailable_id = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "525f0b921195d529f0ead22d538b0e6366c1d7c149414be5085fcfaf32118356"
+}

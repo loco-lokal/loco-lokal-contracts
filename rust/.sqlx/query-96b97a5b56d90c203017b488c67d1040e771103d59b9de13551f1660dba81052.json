@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, account_id, events AS \"events: JsonText\", url, secret, hmac_secret\n           FROM webhook_urls WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "webhook_urls",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "webhook_urls",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "events: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webhook_urls",
+            "name": "events"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webhook_urls",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "secret",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webhook_urls",
+            "name": "secret"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "hmac_secret",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "webhook_urls",
+            "name": "hmac_secret"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "96b97a5b56d90c203017b488c67d1040e771103d59b9de13551f1660dba81052"
+}

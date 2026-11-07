@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO webhook_attempts\n             (webhook_event_id, attempt, response_status_code, response_body, created_at,\n              updated_at)\n           VALUES ($1, $2, $3, $4, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94392979f74dbeafeb402a37d57acb31827ed246c78f223b63c244a28c506573"
+}

@@ -1,0 +1,128 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO submission_events\n             (submission_id, submitter_id, data, event_type, event_timestamp, account_id,\n              created_at, updated_at)\n           VALUES ($1, $2, $3, $4, (now() AT TIME ZONE 'utc'), $5,\n                   (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           RETURNING id, submission_id, submitter_id, data AS \"data: JsonText\", event_type,\n                     event_timestamp, created_at, updated_at, account_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "submission_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "submission_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "submitter_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "submitter_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "data: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "data"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "event_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "event_type"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "event_timestamp",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "event_timestamp"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "account_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "061758b9087db2989d50a3e329f5d25776831a6577e7b1ee4f41c72797daf60c"
+}

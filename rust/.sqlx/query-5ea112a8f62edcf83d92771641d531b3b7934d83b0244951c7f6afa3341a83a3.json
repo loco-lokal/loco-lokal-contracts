@@ -1,0 +1,210 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT a.id, a.name, a.record_type, a.record_id, a.blob_id, a.uuid, a.created_at,\n                   b.key, b.filename, b.content_type, b.metadata, b.service_name, b.byte_size,\n                   b.checksum, b.uuid AS blob_uuid, b.created_at AS blob_created_at\n            FROM active_storage_attachments a\n            JOIN active_storage_blobs b ON b.id = a.blob_id\n            WHERE a.record_type = $1 AND a.record_id = ANY($2) AND a.name = $3\n            ORDER BY a.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "record_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "record_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "record_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "record_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "blob_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "blob_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "uuid",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "uuid"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "active_storage_attachments",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "key",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "filename",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "filename"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "content_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "content_type"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "metadata",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "service_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "service_name"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "byte_size",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "byte_size"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "checksum",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "checksum"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "blob_uuid",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "uuid"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "blob_created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8Array",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "5ea112a8f62edcf83d92771641d531b3b7934d83b0244951c7f6afa3341a83a3"
+}

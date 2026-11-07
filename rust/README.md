@@ -102,6 +102,32 @@ cargo deny check
 
 Set `SQLX_OFFLINE=true` to build without a database.
 
+## API parity checks
+
+`scripts/parity/` runs the same requests against Rails (`RAILS_URL`, default `http://127.0.0.1:3000`) and the Rust server (`RUST_URL`, default `http://127.0.0.1:8080`), then compares the results. Ids, slugs, uuids, times and signed file tokens are normalized. Both servers share the dev database. The `rails` service bind-mounts `rust/tmp/rails-workdir`, so run the Rust server with `WORKDIR=rust/tmp/rails-workdir` to serve the same stored files.
+
+```sh
+eval "$(rust/scripts/parity/seed.sh)"     # PARITY_TOKEN, PARITY_TEMPLATE_ID (a two-party template)
+cd rust/scripts/parity
+./compare.py "$PARITY_TOKEN" GET /api/templates GET /api/submissions   # reads: method/path pairs, optional JSON body
+./writes.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # template clone/update/archive, submission update/archive
+./create.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # submission create modes and errors, submitter updates; compares stored rows
+./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation emails via Mailpit, email_events rows
+./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows
+```
+
+`emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
+
+## Status
+
+Phase 3 ports the JSON API under `/api`: templates, submissions, submitters, form views, the user endpoint, full-text search, invitation emails and webhooks. These parts return 422 or are still missing; they come in later phases:
+
+- Creating `completed` submitters, completing them through `PUT /api/submitters/:id`, and prefilling attachment fields (Phase 4, along with result documents).
+- Dynamic documents (Phase 5).
+- Expiration jobs (Phase 7).
+- Extracting email assets from message bodies of 2 KB or more.
+- Localized month and day names in `{{submission.expire_at}}`, which are English for now.
+
 ## Layout
 
 | Crate | Replaces |

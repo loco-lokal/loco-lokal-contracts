@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n             SELECT 1 FROM account_linked_accounts\n             WHERE account_type = 'testing'\n               AND ((NOT $3 AND account_id = $1 AND linked_account_id = $2)\n                 OR ($3 AND linked_account_id = $1 AND account_id = $2))\n           ) AS \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "79e461bb1849d88eaaa9a1af4f0505052270771bc90cd51741240e3568906136"
+}

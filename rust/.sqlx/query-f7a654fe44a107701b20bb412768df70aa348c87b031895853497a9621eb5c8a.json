@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM active_storage_blobs b WHERE b.id = $1\n              AND NOT EXISTS (SELECT 1 FROM active_storage_attachments a WHERE a.blob_id = b.id)\n            RETURNING id, key, filename, content_type, metadata, service_name, byte_size,\n                      checksum, uuid, created_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "filename",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "filename"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "content_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "content_type"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "metadata",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "service_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "service_name"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "byte_size",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "byte_size"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "checksum",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "checksum"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "uuid",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "uuid"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "active_storage_blobs",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "f7a654fe44a107701b20bb412768df70aa348c87b031895853497a9621eb5c8a"
+}

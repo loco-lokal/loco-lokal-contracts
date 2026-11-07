@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE submitters SET opened_at = (now() AT TIME ZONE 'utc'),\n                               updated_at = (now() AT TIME ZONE 'utc')\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1b9c5dfc3ffd99917a0c36e03531432a9899efb731a8d1d79f871e1cd8b5a629"
+}

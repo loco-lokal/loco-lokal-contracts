@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO template_folders\n             (name, author_id, account_id, parent_folder_id, created_at, updated_at)\n           VALUES ($1, $2, $3, $4, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "template_folders",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "efd41d2bca16f82aee689b7460ad2f897b93e7523d5caa8a3132b86c6a098108"
+}

@@ -48,9 +48,12 @@ services:
       SECRET_KEY_BASE: rust-dev-secret-key-base-not-for-production-use-0123456789abcdef0123456789abcdef
       SMTP_ADDRESS: mailpit
       SMTP_PORT: '1025'
+      SMTP_FROM: Contracts <contracts@example.com>
+      SMTP_ENABLE_STARTTLS: 'false'
     volumes:
-      - documents:/data/docuseal
+      # A host directory, so the Rust server (WORKDIR=rust/tmp/rails-workdir) serves the
+      # same Active Storage files.
+      - ./rust/tmp/rails-workdir:/data/docuseal
 
 volumes:
-  documents:
   postgres:

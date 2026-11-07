@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO search_entries\n             (record_type, record_id, account_id, tsvector, ngram, created_at, updated_at)\n           VALUES ($1, $2, $3, $4::text::tsvector, $5::text::tsvector,\n                   (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           ON CONFLICT (record_id, record_type) DO UPDATE SET\n             account_id = EXCLUDED.account_id, tsvector = EXCLUDED.tsvector,\n             ngram = EXCLUDED.ngram,\n             updated_at = CASE\n               WHEN (search_entries.account_id, search_entries.tsvector, search_entries.ngram)\n                    IS NOT DISTINCT FROM (EXCLUDED.account_id, EXCLUDED.tsvector, EXCLUDED.ngram)\n               THEN search_entries.updated_at ELSE EXCLUDED.updated_at END",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "078c5e10411595861addd1ff7621b1e727a491be0e8c3893c3bc94063cf771eb"
+}

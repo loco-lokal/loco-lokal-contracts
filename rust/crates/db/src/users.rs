@@ -434,3 +434,91 @@ pub async fn encrypted_config_value(
     .fetch_optional(db)
     .await?)
 }
+
+/// `AccountConfig.find_by(account:, key:)&.value`, parsed from its JSON text.
+pub async fn account_config(
+    db: impl PgExecutor<'_>,
+    account_id: i64,
+    key: &str,
+) -> Result<Option<serde_json::Value>, DbError> {
+    let value = sqlx::query_scalar!(
+        "SELECT value FROM account_configs WHERE account_id = $1 AND key = $2",
+        account_id,
+        key
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(value.map(|v| serde_json::from_str(&v).unwrap_or(serde_json::Value::Null)))
+}
+
+/// The user columns the API includes (`author`, `created_by_user`).
+#[derive(Clone, Debug)]
+pub struct UserBrief {
+    pub id: i64,
+    pub email: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+}
+
+pub async fn find_briefs(db: impl PgExecutor<'_>, ids: &[i64]) -> Result<Vec<UserBrief>, DbError> {
+    Ok(sqlx::query_as!(
+        UserBrief,
+        "SELECT id, email, first_name, last_name FROM users WHERE id = ANY($1)",
+        ids
+    )
+    .fetch_all(db)
+    .await?)
+}
+
+/// An account's user by email (`account.users.find_by(email:)`).
+pub async fn find_id_in_account_by_email(
+    db: impl PgExecutor<'_>,
+    account_id: i64,
+    email: &str,
+) -> Result<Option<i64>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT id FROM users WHERE account_id = $1 AND email = $2 ORDER BY id LIMIT 1",
+        account_id,
+        email
+    )
+    .fetch_optional(db)
+    .await?)
+}
+
+/// Whether `record_account_id` is the other side of the current account's testing link:
+/// its production account when `current_is_testing`, else one of its testing accounts.
+pub async fn is_linked_testing_counterpart(
+    db: impl PgExecutor<'_>,
+    current_account_id: i64,
+    current_is_testing: bool,
+    record_account_id: i64,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+             SELECT 1 FROM account_linked_accounts
+             WHERE account_type = 'testing'
+               AND ((NOT $3 AND account_id = $1 AND linked_account_id = $2)
+                 OR ($3 AND linked_account_id = $1 AND account_id = $2))
+           ) AS "exists!""#,
+        current_account_id,
+        record_account_id,
+        current_is_testing,
+    )
+    .fetch_one(db)
+    .await?)
+}
+
+/// `account.linked_account_account&.account_id`: the production account a testing (or
+/// otherwise linked) account belongs to.
+pub async fn linked_parent_account_id(
+    db: impl PgExecutor<'_>,
+    account_id: i64,
+) -> Result<Option<i64>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT account_id FROM account_linked_accounts
+         WHERE linked_account_id = $1 ORDER BY id LIMIT 1",
+        account_id
+    )
+    .fetch_optional(db)
+    .await?)
+}

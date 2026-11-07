@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT submission_id FROM submitters WHERE id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "submission_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submitters",
+            "name": "submission_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "39289de13d054995df3516cd5e2770571f420eb50045f03294c0cc1bc2964db0"
+}

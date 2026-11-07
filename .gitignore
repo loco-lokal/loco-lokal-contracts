@@ -41,4 +41,5 @@ dump.rdb
 
 # Rust backend
 /rust/target
+/rust/tmp
 /rust/vendor

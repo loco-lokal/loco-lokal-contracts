@@ -79,3 +79,24 @@ pub fn signed_id_purpose(model: &str, purpose: Option<&str>) -> String {
         None => model.to_owned(),
     }
 }
+
+/// `SecureRandom.base58(n)`: record slugs and API tokens.
+#[must_use]
+pub fn base58(n: usize) -> String {
+    use rand::RngExt as _;
+    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut rng = rand::rng();
+    (0..n)
+        .map(|_| char::from(ALPHABET[rng.random_range(0..ALPHABET.len())]))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn generates_base58() {
+        let slug = super::base58(14);
+        assert_eq!(slug.len(), 14);
+        assert!(!slug.contains(['0', 'O', 'I', 'l']));
+    }
+}

@@ -24,6 +24,17 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
     }
 }
 
+impl AppError {
+    /// For code outside requests (jobs) that reuses request helpers.
+    #[must_use]
+    pub fn into_anyhow(self) -> anyhow::Error {
+        match self {
+            Self::Status(status) => anyhow::anyhow!("request failed with {status}"),
+            Self::Internal(err) => err,
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = match self {

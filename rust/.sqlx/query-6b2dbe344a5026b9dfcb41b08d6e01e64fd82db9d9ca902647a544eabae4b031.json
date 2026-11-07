@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE templates SET\n             name = $2, external_id = $3, shared_link = $4, submitters = $5, fields = $6,\n             folder_id = $7, archived_at = $8,\n             updated_at = CASE\n               WHEN (name, external_id, shared_link, submitters, fields, folder_id, archived_at)\n                    IS NOT DISTINCT FROM\n                    ($2::varchar, $3::varchar, $4::boolean, $5::text, $6::text, $7::bigint, $8::timestamp)\n               THEN updated_at ELSE (now() AT TIME ZONE 'utc') END\n           WHERE id = $1\n           RETURNING updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "updated_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Text",
+        "Text",
+        "Int8",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6b2dbe344a5026b9dfcb41b08d6e01e64fd82db9d9ca902647a544eabae4b031"
+}

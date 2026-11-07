@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH inserted AS (\n             INSERT INTO webhook_events\n               (uuid, webhook_url_id, account_id, event_type, record_type, record_id, status,\n                created_at, updated_at)\n             VALUES ($1, $2, $3, $4, $5, $6, 'pending',\n                     (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n             ON CONFLICT (uuid, webhook_url_id) DO NOTHING\n             RETURNING id, status, created_at\n           )\n           SELECT id AS \"id!\", status AS \"status!\", created_at AS \"created_at!\" FROM inserted\n           UNION ALL\n           SELECT id, status, created_at FROM webhook_events\n           WHERE uuid = $1 AND webhook_url_id = $2\n           LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "status!",
+        "type_info": "Varchar",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at!",
+        "type_info": "Timestamp",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "603ba8dc12422f711a51ad43d480a02f2f3671d1e3dd5bf2cb17977bd27e81ae"
+}

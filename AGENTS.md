@@ -131,6 +131,8 @@ A Rust replacement for the Rails backend is in progress under `rust/`. It is a C
 - Rust-only tables (such as the `rust_jobs` queue and `rust_sessions`) are added through `rust/migrations`, never through Rails migrations.
 - Templates in `rust/templates/` are ports of `app/views`. The Rust server reads `app/views/icons`, `app/views/errors`, `config/locales`, and `public/` directly, so keep those in place until cutover.
 - CI runs the `Rust` job (fmt, clippy `-D warnings`, nextest, sqlx offline check, cargo-deny).
+- A ported endpoint, email, or webhook must match Rails' observable output, not just its intent. `rust/scripts/parity/` compares the two backends (responses, stored rows, Mailpit messages, webhook requests). Extend those scripts when porting behavior, and run them against the `rails` service rather than trusting a reading of the Ruby source.
+- An unported branch of a ported endpoint returns 422 with a "not supported yet" message, never a silently different result. `rust/README.md` ("Status") lists what is deferred.
 
 ## Contribution conventions
 

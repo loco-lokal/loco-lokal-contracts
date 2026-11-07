@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sha1, data FROM email_message_assets WHERE account_id = $1 AND sha1 = ANY($2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha1",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "email_message_assets",
+            "name": "sha1"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "data",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "email_message_assets",
+            "name": "data"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d5aea30cd8ca0820d969dfc45985e45c8b21d66c98be82b399b8219f72ed48dc"
+}

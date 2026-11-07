@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO template_accesses (template_id, user_id, created_at, updated_at)\n           SELECT $2, user_id, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc')\n           FROM template_accesses WHERE template_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b267ac1b81d01393cb603dc9c26e1c5ccff8a9935ccc33f8eba0f23ad2de2bee"
+}

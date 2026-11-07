@@ -1,6 +1,5 @@
 //! Route handlers, grouped like the Rails controllers they port.
 
-pub mod api;
 pub mod dashboard;
 pub mod passwords;
 pub mod sessions;
@@ -64,5 +63,10 @@ pub fn router() -> Router<AppState> {
                 .put(passwords::update_invitation)
                 .patch(passwords::update_invitation),
         )
-        .route("/api/user", get(api::user))
+        .merge(crate::api::router())
+        .route("/file/{signed_uuid}/{*filename}", get(crate::files::show))
+        .route(
+            "/blobs_proxy/{signed_uuid}/{*filename}",
+            get(crate::files::show),
+        )
 }

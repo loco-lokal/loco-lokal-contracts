@@ -31,6 +31,8 @@ pub struct AppState {
     /// `Docuseal.default_url_options` as an origin (`http://host[:port]`).
     default_url: Arc<RwLock<String>>,
     pub rate_limit: crate::rate_limit::RateLimit,
+    /// Outgoing HTTP (webhooks): `open_timeout` 8 s, no redirects, as Faraday does.
+    pub http: reqwest::Client,
 }
 
 impl AppState {
@@ -59,6 +61,11 @@ impl AppState {
             mailer,
             default_url: Arc::new(RwLock::new(FALLBACK_APP_URL.to_owned())),
             rate_limit: crate::rate_limit::RateLimit::default(),
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(8))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .context("building the HTTP client")?,
         };
         state.refresh_default_url().await?;
         Ok(state)

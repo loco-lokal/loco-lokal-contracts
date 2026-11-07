@@ -1,0 +1,247 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE submissions SET name = $2, expire_at = $3, archived_at = $4,\n             updated_at = CASE\n               WHEN (name, expire_at, archived_at) IS NOT DISTINCT FROM ($2::text, $3::timestamp, $4::timestamp)\n               THEN updated_at ELSE (now() AT TIME ZONE 'utc') END\n           WHERE id = $1\n           RETURNING id, template_id, created_by_user_id, archived_at, created_at, updated_at,\n                     template_fields AS \"template_fields: JsonText\",\n                     template_schema AS \"template_schema: JsonText\",\n                     template_submitters AS \"template_submitters: JsonText\",\n                     source, submitters_order, slug, preferences AS \"preferences: JsonText\",\n                     account_id, expire_at, name,\n                     variables_schema AS \"variables_schema: JsonText\",\n                     variables AS \"variables: JsonText\", completed_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "template_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "template_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "created_by_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "created_by_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "archived_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "archived_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "template_fields: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "template_fields"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "template_schema: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "template_schema"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "template_submitters: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "template_submitters"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "source",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "source"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "submitters_order",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "submitters_order"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "slug",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "preferences: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "preferences"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "expire_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "expire_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "variables_schema: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "variables_schema"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "variables: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "variables"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "completed_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submissions",
+            "name": "completed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamp",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "0d2175f720e735f081aa8df002e93ffebb94c04d32eadfade7f59eee41c8385d"
+}

@@ -148,6 +148,7 @@ pub async fn send_reset_password_instructions(
         html,
         text: None,
         attachments: Vec::new(),
+        headers: Vec::new(),
     };
     if let Err(err) = state.mailer.deliver(&email).await {
         tracing::error!(%err, user_id = user.id, "sending reset password instructions failed");
@@ -156,7 +157,7 @@ pub async fn send_reset_password_instructions(
 }
 
 /// `ApplicationMailer#default_url_options`: the app URL with `EMAIL_HOST` as host.
-fn email_origin(state: &AppState) -> String {
+pub(crate) fn email_origin(state: &AppState) -> String {
     let origin = state.default_url();
     match std::env::var("EMAIL_HOST").ok().filter(|h| !h.is_empty()) {
         Some(host) => {

@@ -4,8 +4,17 @@
 //! checking against a migrated database, or the offline data in `rust/.sqlx/` when
 //! `SQLX_OFFLINE=true`.
 
+pub mod destroy;
+mod json_text;
+pub mod records;
+pub mod search;
 pub mod sessions;
+pub mod submissions;
+pub mod templates;
 pub mod users;
+pub mod webhooks;
+
+pub use json_text::JsonText;
 
 use std::time::Duration;
 

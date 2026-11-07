@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.account_id FROM dynamic_document_versions v\n                 JOIN dynamic_documents d ON d.id = v.dynamic_document_id\n                 JOIN templates t ON t.id = d.template_id WHERE v.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "templates",
+            "name": "account_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "65d0a2d80df28b7c950c81bdaba43c5aa0e691c38017a82a1908294ceea3b2c4"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM submission_events WHERE submission_id = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e6cf829bdc6fd03a576e50fe7f27235f344d71ea7fb02f7a5381dc4a57c0c547"
+}

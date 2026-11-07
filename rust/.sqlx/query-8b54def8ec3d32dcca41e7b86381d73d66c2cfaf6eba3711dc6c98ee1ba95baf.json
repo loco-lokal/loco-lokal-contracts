@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH parents AS (\n             DELETE FROM active_storage_attachments\n             WHERE record_type = $1 AND record_id = ANY($2)\n             RETURNING id, blob_id\n           ), previews AS (\n             DELETE FROM active_storage_attachments\n             WHERE record_type = 'ActiveStorage::Attachment'\n               AND record_id IN (SELECT id FROM parents)\n             RETURNING blob_id\n           )\n           SELECT blob_id AS \"blob_id!\" FROM parents\n           UNION SELECT blob_id FROM previews",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "blob_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8b54def8ec3d32dcca41e7b86381d73d66c2cfaf6eba3711dc6c98ee1ba95baf"
+}

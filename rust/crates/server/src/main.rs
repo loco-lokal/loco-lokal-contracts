@@ -42,6 +42,8 @@ async fn main() -> anyhow::Result<()> {
             state.clone(),
             loco_jobs::WorkerConfig {
                 concurrency: job_concurrency,
+                // Sidekiq's queues in this app (`config/sidekiq.yml`).
+                queues: vec!["default".into(), "mailers".into(), "webhooks".into()],
                 ..loco_jobs::WorkerConfig::default()
             },
             shutdown.clone(),

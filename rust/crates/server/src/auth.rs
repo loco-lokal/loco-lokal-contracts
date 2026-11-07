@@ -197,51 +197,62 @@ impl FromRequestParts<AppState> for ApiAuth {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
-        let not_authenticated = || {
-            (
+        match api_auth(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?
+        {
+            Some(auth) => Ok(Self(auth)),
+            None => Err((
                 StatusCode::UNAUTHORIZED,
                 Json(json!({ "error": "Not authenticated" })),
             )
-                .into_response()
-        };
-
-        if let Ok(session) = Session::from_request_parts(parts, state).await
-            && let Some(auth) = session_auth(state, &session)
-                .await
-                .map_err(IntoResponse::into_response)?
-        {
-            return Ok(Self(auth));
+                .into_response()),
         }
-
-        let Some(token) = parts
-            .headers
-            .get("x-auth-token")
-            .and_then(|v| v.to_str().ok())
-            .filter(|t| !t.trim().is_empty())
-        else {
-            return Err(not_authenticated());
-        };
-
-        let sha256 = hex::encode(Sha256::digest(token.as_bytes()));
-        let Some(user) = users::find_by_access_token_digest(&state.db, &sha256)
-            .await
-            .map_err(|e| AppError::from(e).into_response())?
-        else {
-            return Err(not_authenticated());
-        };
-        let Some(account) = users::find_account(&state.db, user.account_id)
-            .await
-            .map_err(|e| AppError::from(e).into_response())?
-        else {
-            return Err(not_authenticated());
-        };
-
-        Ok(Self(Auth {
-            true_user: user.clone(),
-            user,
-            account,
-        }))
     }
+}
+
+/// `current_user` of an API controller that skips `authenticate_user!`.
+pub struct MaybeApiAuth(pub Option<Auth>);
+
+impl FromRequestParts<AppState> for MaybeApiAuth {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
+        Ok(Self(
+            api_auth(parts, state)
+                .await
+                .map_err(IntoResponse::into_response)?,
+        ))
+    }
+}
+
+async fn api_auth(parts: &mut Parts, state: &AppState) -> Result<Option<Auth>, AppError> {
+    if let Ok(session) = Session::from_request_parts(parts, state).await
+        && let Some(auth) = session_auth(state, &session).await?
+    {
+        return Ok(Some(auth));
+    }
+
+    let Some(token) = parts
+        .headers
+        .get("x-auth-token")
+        .and_then(|v| v.to_str().ok())
+        .filter(|t| !t.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let sha256 = hex::encode(Sha256::digest(token.as_bytes()));
+    let Some(user) = users::find_by_access_token_digest(&state.db, &sha256).await? else {
+        return Ok(None);
+    };
+    let account = users::find_account(&state.db, user.account_id).await?;
+
+    Ok(account.map(|account| Auth {
+        true_user: user.clone(),
+        user,
+        account,
+    }))
 }
 
 /// `after_sign_in_path_for`: a safe local `redir` parameter, else the stored location,
