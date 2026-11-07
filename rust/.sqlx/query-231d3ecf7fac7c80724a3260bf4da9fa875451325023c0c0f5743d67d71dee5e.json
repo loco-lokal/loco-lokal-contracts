@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET\n            failed_attempts = failed_attempts + 1,\n            locked_at = CASE\n                WHEN locked_at IS NULL AND failed_attempts + 1 >= $2 THEN now() AT TIME ZONE 'UTC'\n                ELSE locked_at\n            END,\n            updated_at = now() AT TIME ZONE 'UTC'\n         WHERE id = $1\n         RETURNING failed_attempts, locked_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "failed_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "failed_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "locked_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "locked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "231d3ecf7fac7c80724a3260bf4da9fa875451325023c0c0f5743d67d71dee5e"
+}

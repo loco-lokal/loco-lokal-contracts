@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET locked_at = NULL, failed_attempts = 0, unlock_token = NULL,\n                          updated_at = now() AT TIME ZONE 'UTC'\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "843ce3f603b662e343dd5049b649832d7d031b0763677a59631d138902f2f0aa"
+}

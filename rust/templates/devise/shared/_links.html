@@ -1,0 +1,21 @@
+{#- Port of app/views/devise/shared/_links.html.erb. `controller` is sessions, passwords
+    or invitations; `lang_options` is [(code, label)]. -#}
+<div class="flex justify-between mt-4">
+  {%- if controller != 'sessions' %}
+    <a class="link link-hover mx-auto" href="/sign_in{% if lang %}?lang={{ lang | urlencode }}{% endif %}">{{ t('already_have_an_account') }}</a>
+  {% endif %}
+  {%- if controller != 'passwords' %}
+    <a class="link link-hover" href="/password/new{% if lang %}?lang={{ lang | urlencode }}{% endif %}">{{ t('forgot_your_password_') }}</a>
+  {% endif %}
+</div>
+<div class="text-center mt-10">
+  <form action="{{ request_path }}" accept-charset="UTF-8" method="get">
+    {% if redir %}
+      <input type="hidden" name="redir" id="redir" value="{{ redir }}" />
+    {% endif %}
+    <submit-form data-on="change">
+      <select name="lang" id="lang" class="select select-sm border-base-content/30 text-base">
+        {%- for option in lang_options %}{% if not loop.first %}
+{% endif %}<option {% if option.code == locale %}selected="selected" {% endif %}value="{{ option.code }}">{{ option.label }}</option>{% endfor %}</select>
+    </submit-form>
+</form></div>

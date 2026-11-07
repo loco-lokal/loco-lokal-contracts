@@ -219,7 +219,7 @@ jobs:
       - name: Load baseline schema and Rust-owned tables
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f schema/baseline.sql
-          for f in crates/*/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"; done
+          for f in migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"; done
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy

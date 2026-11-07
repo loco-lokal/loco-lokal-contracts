@@ -68,6 +68,25 @@ encrypted_config = {
   'stored' => EncryptedConfig.type_for_attribute(:value).serialize(smtp_value)
 }
 
+otp_secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
+otp_time = Time.utc(2026, 11, 7, 12, 0, 0)
+otp = ROTP::TOTP.new(otp_secret, issuer: Docuseal.product_name)
+devise = {
+  'reset_password_token' => {
+    'raw' => 'rawResetToken1234567',
+    'digest' => Devise.token_generator.digest(User, :reset_password_token, 'rawResetToken1234567')
+  },
+  'otp' => {
+    'secret' => otp_secret,
+    'unix_time' => otp_time.to_i,
+    'code' => otp.at(otp_time),
+    'code_previous_step' => otp.at(otp_time - 30),
+    'provisioning_uri' => User.new(otp_secret:).otp_provisioning_uri('ana@example.test', issuer: Docuseal.product_name)
+  },
+  'product_name' => Docuseal.product_name,
+  'friendly_token_length' => Devise.friendly_token.length
+}
+
 password = 'correct horse battery staple'
 user = User.new(password:)
 
@@ -89,5 +108,6 @@ puts JSON.pretty_generate(
     'blob_signed_id' => active_storage_blob
   },
   'encrypted_config_smtp' => encrypted_config,
+  'devise' => devise,
   'bcrypt' => { 'password' => password, 'hash' => user.encrypted_password, 'pepper' => Devise.pepper }
 )

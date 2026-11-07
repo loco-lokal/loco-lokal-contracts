@@ -1,0 +1,610 @@
+[
+  {
+    "name": "International Date Line West",
+    "tzinfo": "Etc/GMT+12"
+  },
+  {
+    "name": "American Samoa",
+    "tzinfo": "Pacific/Pago_Pago"
+  },
+  {
+    "name": "Midway Island",
+    "tzinfo": "Pacific/Midway"
+  },
+  {
+    "name": "Hawaii",
+    "tzinfo": "Pacific/Honolulu"
+  },
+  {
+    "name": "Alaska",
+    "tzinfo": "America/Juneau"
+  },
+  {
+    "name": "Pacific Time (US & Canada)",
+    "tzinfo": "America/Los_Angeles"
+  },
+  {
+    "name": "Tijuana",
+    "tzinfo": "America/Tijuana"
+  },
+  {
+    "name": "Arizona",
+    "tzinfo": "America/Phoenix"
+  },
+  {
+    "name": "Mazatlan",
+    "tzinfo": "America/Mazatlan"
+  },
+  {
+    "name": "Mountain Time (US & Canada)",
+    "tzinfo": "America/Denver"
+  },
+  {
+    "name": "Central America",
+    "tzinfo": "America/Guatemala"
+  },
+  {
+    "name": "Central Time (US & Canada)",
+    "tzinfo": "America/Chicago"
+  },
+  {
+    "name": "Chihuahua",
+    "tzinfo": "America/Chihuahua"
+  },
+  {
+    "name": "Guadalajara",
+    "tzinfo": "America/Mexico_City"
+  },
+  {
+    "name": "Mexico City",
+    "tzinfo": "America/Mexico_City"
+  },
+  {
+    "name": "Monterrey",
+    "tzinfo": "America/Monterrey"
+  },
+  {
+    "name": "Saskatchewan",
+    "tzinfo": "America/Regina"
+  },
+  {
+    "name": "Bogota",
+    "tzinfo": "America/Bogota"
+  },
+  {
+    "name": "Eastern Time (US & Canada)",
+    "tzinfo": "America/New_York"
+  },
+  {
+    "name": "Indiana (East)",
+    "tzinfo": "America/Indiana/Indianapolis"
+  },
+  {
+    "name": "Lima",
+    "tzinfo": "America/Lima"
+  },
+  {
+    "name": "Quito",
+    "tzinfo": "America/Lima"
+  },
+  {
+    "name": "Atlantic Time (Canada)",
+    "tzinfo": "America/Halifax"
+  },
+  {
+    "name": "Caracas",
+    "tzinfo": "America/Caracas"
+  },
+  {
+    "name": "Georgetown",
+    "tzinfo": "America/Guyana"
+  },
+  {
+    "name": "La Paz",
+    "tzinfo": "America/La_Paz"
+  },
+  {
+    "name": "Puerto Rico",
+    "tzinfo": "America/Puerto_Rico"
+  },
+  {
+    "name": "Santiago",
+    "tzinfo": "America/Santiago"
+  },
+  {
+    "name": "Newfoundland",
+    "tzinfo": "America/St_Johns"
+  },
+  {
+    "name": "Asuncion",
+    "tzinfo": "America/Asuncion"
+  },
+  {
+    "name": "Brasilia",
+    "tzinfo": "America/Sao_Paulo"
+  },
+  {
+    "name": "Buenos Aires",
+    "tzinfo": "America/Argentina/Buenos_Aires"
+  },
+  {
+    "name": "Montevideo",
+    "tzinfo": "America/Montevideo"
+  },
+  {
+    "name": "Greenland",
+    "tzinfo": "America/Nuuk"
+  },
+  {
+    "name": "Mid-Atlantic",
+    "tzinfo": "Atlantic/South_Georgia"
+  },
+  {
+    "name": "Azores",
+    "tzinfo": "Atlantic/Azores"
+  },
+  {
+    "name": "Cape Verde Is.",
+    "tzinfo": "Atlantic/Cape_Verde"
+  },
+  {
+    "name": "Edinburgh",
+    "tzinfo": "Europe/London"
+  },
+  {
+    "name": "Lisbon",
+    "tzinfo": "Europe/Lisbon"
+  },
+  {
+    "name": "London",
+    "tzinfo": "Europe/London"
+  },
+  {
+    "name": "Monrovia",
+    "tzinfo": "Africa/Monrovia"
+  },
+  {
+    "name": "UTC",
+    "tzinfo": "Etc/UTC"
+  },
+  {
+    "name": "Amsterdam",
+    "tzinfo": "Europe/Amsterdam"
+  },
+  {
+    "name": "Belgrade",
+    "tzinfo": "Europe/Belgrade"
+  },
+  {
+    "name": "Berlin",
+    "tzinfo": "Europe/Berlin"
+  },
+  {
+    "name": "Bern",
+    "tzinfo": "Europe/Zurich"
+  },
+  {
+    "name": "Bratislava",
+    "tzinfo": "Europe/Bratislava"
+  },
+  {
+    "name": "Brussels",
+    "tzinfo": "Europe/Brussels"
+  },
+  {
+    "name": "Budapest",
+    "tzinfo": "Europe/Budapest"
+  },
+  {
+    "name": "Casablanca",
+    "tzinfo": "Africa/Casablanca"
+  },
+  {
+    "name": "Copenhagen",
+    "tzinfo": "Europe/Copenhagen"
+  },
+  {
+    "name": "Dublin",
+    "tzinfo": "Europe/Dublin"
+  },
+  {
+    "name": "Ljubljana",
+    "tzinfo": "Europe/Ljubljana"
+  },
+  {
+    "name": "Madrid",
+    "tzinfo": "Europe/Madrid"
+  },
+  {
+    "name": "Paris",
+    "tzinfo": "Europe/Paris"
+  },
+  {
+    "name": "Prague",
+    "tzinfo": "Europe/Prague"
+  },
+  {
+    "name": "Rome",
+    "tzinfo": "Europe/Rome"
+  },
+  {
+    "name": "Sarajevo",
+    "tzinfo": "Europe/Sarajevo"
+  },
+  {
+    "name": "Skopje",
+    "tzinfo": "Europe/Skopje"
+  },
+  {
+    "name": "Stockholm",
+    "tzinfo": "Europe/Stockholm"
+  },
+  {
+    "name": "Vienna",
+    "tzinfo": "Europe/Vienna"
+  },
+  {
+    "name": "Warsaw",
+    "tzinfo": "Europe/Warsaw"
+  },
+  {
+    "name": "West Central Africa",
+    "tzinfo": "Africa/Algiers"
+  },
+  {
+    "name": "Zagreb",
+    "tzinfo": "Europe/Zagreb"
+  },
+  {
+    "name": "Zurich",
+    "tzinfo": "Europe/Zurich"
+  },
+  {
+    "name": "Athens",
+    "tzinfo": "Europe/Athens"
+  },
+  {
+    "name": "Bucharest",
+    "tzinfo": "Europe/Bucharest"
+  },
+  {
+    "name": "Cairo",
+    "tzinfo": "Africa/Cairo"
+  },
+  {
+    "name": "Harare",
+    "tzinfo": "Africa/Harare"
+  },
+  {
+    "name": "Helsinki",
+    "tzinfo": "Europe/Helsinki"
+  },
+  {
+    "name": "Jerusalem",
+    "tzinfo": "Asia/Jerusalem"
+  },
+  {
+    "name": "Kaliningrad",
+    "tzinfo": "Europe/Kaliningrad"
+  },
+  {
+    "name": "Kyiv",
+    "tzinfo": "Europe/Kiev"
+  },
+  {
+    "name": "Pretoria",
+    "tzinfo": "Africa/Johannesburg"
+  },
+  {
+    "name": "Riga",
+    "tzinfo": "Europe/Riga"
+  },
+  {
+    "name": "Sofia",
+    "tzinfo": "Europe/Sofia"
+  },
+  {
+    "name": "Tallinn",
+    "tzinfo": "Europe/Tallinn"
+  },
+  {
+    "name": "Vilnius",
+    "tzinfo": "Europe/Vilnius"
+  },
+  {
+    "name": "Baghdad",
+    "tzinfo": "Asia/Baghdad"
+  },
+  {
+    "name": "Istanbul",
+    "tzinfo": "Europe/Istanbul"
+  },
+  {
+    "name": "Kuwait",
+    "tzinfo": "Asia/Kuwait"
+  },
+  {
+    "name": "Minsk",
+    "tzinfo": "Europe/Minsk"
+  },
+  {
+    "name": "Moscow",
+    "tzinfo": "Europe/Moscow"
+  },
+  {
+    "name": "Nairobi",
+    "tzinfo": "Africa/Nairobi"
+  },
+  {
+    "name": "Riyadh",
+    "tzinfo": "Asia/Riyadh"
+  },
+  {
+    "name": "St. Petersburg",
+    "tzinfo": "Europe/Moscow"
+  },
+  {
+    "name": "Volgograd",
+    "tzinfo": "Europe/Volgograd"
+  },
+  {
+    "name": "Tehran",
+    "tzinfo": "Asia/Tehran"
+  },
+  {
+    "name": "Abu Dhabi",
+    "tzinfo": "Asia/Muscat"
+  },
+  {
+    "name": "Baku",
+    "tzinfo": "Asia/Baku"
+  },
+  {
+    "name": "Muscat",
+    "tzinfo": "Asia/Muscat"
+  },
+  {
+    "name": "Samara",
+    "tzinfo": "Europe/Samara"
+  },
+  {
+    "name": "Tbilisi",
+    "tzinfo": "Asia/Tbilisi"
+  },
+  {
+    "name": "Yerevan",
+    "tzinfo": "Asia/Yerevan"
+  },
+  {
+    "name": "Kabul",
+    "tzinfo": "Asia/Kabul"
+  },
+  {
+    "name": "Almaty",
+    "tzinfo": "Asia/Almaty"
+  },
+  {
+    "name": "Astana",
+    "tzinfo": "Asia/Almaty"
+  },
+  {
+    "name": "Ekaterinburg",
+    "tzinfo": "Asia/Yekaterinburg"
+  },
+  {
+    "name": "Islamabad",
+    "tzinfo": "Asia/Karachi"
+  },
+  {
+    "name": "Karachi",
+    "tzinfo": "Asia/Karachi"
+  },
+  {
+    "name": "Tashkent",
+    "tzinfo": "Asia/Tashkent"
+  },
+  {
+    "name": "Chennai",
+    "tzinfo": "Asia/Kolkata"
+  },
+  {
+    "name": "Kolkata",
+    "tzinfo": "Asia/Kolkata"
+  },
+  {
+    "name": "Mumbai",
+    "tzinfo": "Asia/Kolkata"
+  },
+  {
+    "name": "New Delhi",
+    "tzinfo": "Asia/Kolkata"
+  },
+  {
+    "name": "Sri Jayawardenepura",
+    "tzinfo": "Asia/Colombo"
+  },
+  {
+    "name": "Kathmandu",
+    "tzinfo": "Asia/Kathmandu"
+  },
+  {
+    "name": "Dhaka",
+    "tzinfo": "Asia/Dhaka"
+  },
+  {
+    "name": "Urumqi",
+    "tzinfo": "Asia/Urumqi"
+  },
+  {
+    "name": "Rangoon",
+    "tzinfo": "Asia/Rangoon"
+  },
+  {
+    "name": "Bangkok",
+    "tzinfo": "Asia/Bangkok"
+  },
+  {
+    "name": "Hanoi",
+    "tzinfo": "Asia/Bangkok"
+  },
+  {
+    "name": "Jakarta",
+    "tzinfo": "Asia/Jakarta"
+  },
+  {
+    "name": "Krasnoyarsk",
+    "tzinfo": "Asia/Krasnoyarsk"
+  },
+  {
+    "name": "Novosibirsk",
+    "tzinfo": "Asia/Novosibirsk"
+  },
+  {
+    "name": "Beijing",
+    "tzinfo": "Asia/Shanghai"
+  },
+  {
+    "name": "Chongqing",
+    "tzinfo": "Asia/Chongqing"
+  },
+  {
+    "name": "Hong Kong",
+    "tzinfo": "Asia/Hong_Kong"
+  },
+  {
+    "name": "Irkutsk",
+    "tzinfo": "Asia/Irkutsk"
+  },
+  {
+    "name": "Kuala Lumpur",
+    "tzinfo": "Asia/Kuala_Lumpur"
+  },
+  {
+    "name": "Perth",
+    "tzinfo": "Australia/Perth"
+  },
+  {
+    "name": "Singapore",
+    "tzinfo": "Asia/Singapore"
+  },
+  {
+    "name": "Taipei",
+    "tzinfo": "Asia/Taipei"
+  },
+  {
+    "name": "Ulaanbaatar",
+    "tzinfo": "Asia/Ulaanbaatar"
+  },
+  {
+    "name": "Osaka",
+    "tzinfo": "Asia/Tokyo"
+  },
+  {
+    "name": "Sapporo",
+    "tzinfo": "Asia/Tokyo"
+  },
+  {
+    "name": "Seoul",
+    "tzinfo": "Asia/Seoul"
+  },
+  {
+    "name": "Tokyo",
+    "tzinfo": "Asia/Tokyo"
+  },
+  {
+    "name": "Yakutsk",
+    "tzinfo": "Asia/Yakutsk"
+  },
+  {
+    "name": "Adelaide",
+    "tzinfo": "Australia/Adelaide"
+  },
+  {
+    "name": "Darwin",
+    "tzinfo": "Australia/Darwin"
+  },
+  {
+    "name": "Brisbane",
+    "tzinfo": "Australia/Brisbane"
+  },
+  {
+    "name": "Canberra",
+    "tzinfo": "Australia/Canberra"
+  },
+  {
+    "name": "Guam",
+    "tzinfo": "Pacific/Guam"
+  },
+  {
+    "name": "Hobart",
+    "tzinfo": "Australia/Hobart"
+  },
+  {
+    "name": "Melbourne",
+    "tzinfo": "Australia/Melbourne"
+  },
+  {
+    "name": "Port Moresby",
+    "tzinfo": "Pacific/Port_Moresby"
+  },
+  {
+    "name": "Sydney",
+    "tzinfo": "Australia/Sydney"
+  },
+  {
+    "name": "Vladivostok",
+    "tzinfo": "Asia/Vladivostok"
+  },
+  {
+    "name": "Magadan",
+    "tzinfo": "Asia/Magadan"
+  },
+  {
+    "name": "New Caledonia",
+    "tzinfo": "Pacific/Noumea"
+  },
+  {
+    "name": "Solomon Is.",
+    "tzinfo": "Pacific/Guadalcanal"
+  },
+  {
+    "name": "Srednekolymsk",
+    "tzinfo": "Asia/Srednekolymsk"
+  },
+  {
+    "name": "Auckland",
+    "tzinfo": "Pacific/Auckland"
+  },
+  {
+    "name": "Fiji",
+    "tzinfo": "Pacific/Fiji"
+  },
+  {
+    "name": "Kamchatka",
+    "tzinfo": "Asia/Kamchatka"
+  },
+  {
+    "name": "Marshall Is.",
+    "tzinfo": "Pacific/Majuro"
+  },
+  {
+    "name": "Wellington",
+    "tzinfo": "Pacific/Auckland"
+  },
+  {
+    "name": "Chatham Is.",
+    "tzinfo": "Pacific/Chatham"
+  },
+  {
+    "name": "Nuku'alofa",
+    "tzinfo": "Pacific/Tongatapu"
+  },
+  {
+    "name": "Samoa",
+    "tzinfo": "Pacific/Apia"
+  },
+  {
+    "name": "Tokelau Is.",
+    "tzinfo": "Pacific/Fakaofo"
+  }
+]

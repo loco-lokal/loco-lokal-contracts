@@ -1,0 +1,71 @@
+{#- Port of app/views/setup/index.html.erb -#}
+{% extends "layouts/application.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="agency-auth max-w-xl mx-auto">
+  <h1 class="flex text-4xl font-bold items-center justify-center my-8 space-x-2">
+    <span>{{ t('initial_setup') }}</span>
+    {{ svg_icon('waving_hand', class='h-10 w-10') }}
+  </h1>
+  <form class="space-y-6" action="/setup" accept-charset="UTF-8" method="post"><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+    <div class="space-y-2">
+      
+        <div class="grid gap-2 md:grid-cols-2 md:gap-4">
+          <div class="form-control">
+            <label class="label" for="user_first_name">{{ t('first_name') }}</label>
+            <input required="required" class="base-input" type="text" {% if form.first_name %}value="{{ form.first_name }}" {% endif %}name="user[first_name]" id="user_first_name" />
+          </div>
+          <div class="form-control">
+            <label class="label" for="user_last_name">{{ t('last_name') }}</label>
+            <input required="required" class="base-input" type="text" {% if form.last_name %}value="{{ form.last_name }}" {% endif %}name="user[last_name]" id="user_last_name" />
+          </div>
+        </div>
+      
+        <div class="form-control">
+          <label class="label" for="user_email">{{ t('email') }}</label>
+          <input required="required" class="base-input" type="email" {% if form.email %}value="{{ form.email }}" {% endif %}name="user[email]" id="user_email" />
+        </div>
+      
+        <input type="hidden" value="{{ form.timezone }}" name="account[timezone]" id="account_timezone" />
+        <set-timezone data-input-id="account_timezone"></set-timezone>
+        <div class="form-control">
+          <label class="label" for="account_name">{{ t('company_name') }}</label>
+          <input required="required" class="base-input" type="text" {% if form.account_name %}value="{{ form.account_name }}" {% endif %}name="account[name]" id="account_name" />
+        </div>
+      
+        <div class="form-control">
+          <label class="label" for="user_password">{{ t('password') }}</label>
+          <password-input class="block relative">
+            <input required="required" placeholder="************" class="base-input w-full pr-10" data-target="password-input.passwordInput" type="password" name="user[password]" id="user_password" />
+            <button data-target="password-input.togglePasswordVisibility" type="button" class="absolute inset-y-0 h-12 right-0 pr-3 flex items-center">
+              <span data-target="password-input.hiddenPasswordIcon">
+                {{ svg_icon('eye', class='w-6 h-6 shrink-0 bg-white') }}
+              </span>
+              <span data-target="password-input.visiblePasswordIcon" class="hidden">
+                {{ svg_icon('eye_off', class='w-6 h-6 shrink-0 bg-white') }}
+              </span>
+            </button>
+          </password-input>
+        </div>
+      
+        <div class="form-control">
+          {% if not form.app_url %}
+            <set-origin-url data-input-id="encrypted_config_value"></set-origin-url>
+          {% endif %}
+          <label class="label" for="encrypted_config_value">{{ t('app_url') }}</label>
+          <input required="required" class="base-input" type="text" {% if form.app_url %}value="{{ form.app_url }}" {% endif %}name="encrypted_config[value]" id="encrypted_config_value" />
+        </div>
+      
+        <div class="form-control">
+          <label class="label" for="account_locale">{{ t('language') }}</label>
+          <select class="base-select" name="account[locale]" id="account_locale">
+            {%- for option in locale_options %}{% if not loop.first %}
+{% endif %}<option {% if option.code == form.locale %}selected="selected" {% endif %}value="{{ option.code }}">{{ option.label }}</option>{% endfor %}</select>
+        </div>
+      
+    </div>
+    <div class="form-control">
+      <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('submit'), disabled_with=t('submitting')) }}</button>
+    </div>
+</form></div>
+{% endblock %}

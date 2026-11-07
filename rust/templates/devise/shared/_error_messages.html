@@ -1,0 +1,16 @@
+{#- Port of app/views/devise/shared/_error_messages.html.erb. `errors` is
+    {count, header, messages}. -#}
+{% if errors and errors.messages %}
+  <div id="error_explanation" data-turbo-cache="false">
+    <div class="alert">
+      {{ svg_icon('x_circle', class='stroke-current shrink-0 h-6 w-6') }}
+      <div>
+        <p class="font-bold">
+          {{ errors.header }}</p>
+        {% for message in errors.messages %}
+          <p class="text-sm">{{ message }}</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}

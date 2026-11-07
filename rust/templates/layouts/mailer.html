@@ -1,0 +1,18 @@
+{#- Port of app/views/layouts/mailer.html.erb with shared/_mailer_attribution -#}
+<!DOCTYPE html>
+<html>
+  <head>
+    <title></title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style></style>
+  </head>
+  <body dir="{{ dir or 'auto' }}">
+    {% block content %}{% endblock %}
+    <p>
+  ---
+</p>
+<p>
+    {{ t('sent_using_product_name_open_source_software_html', product_url='https://www.docuseal.com/open', product_name=product_name) | strip_links }}
+</p>
+  </body>
+</html>

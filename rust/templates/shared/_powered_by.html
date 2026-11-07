@@ -1,0 +1,7 @@
+{#- Port of app/views/shared/_powered_by.html.erb (without the signed-documents counter) -#}
+<div class="text-center px-2">
+  {{ t('powered_by') }}
+  {{ product_name }} - {{ t('open_source_documents_software') }}
+  &middot;
+  <a href="{{ source_code_url }}" class="underline" target="_blank" rel="noopener noreferrer">{{ t('agency.source_code') }}</a>
+</div>

@@ -1,0 +1,26 @@
+{#- Port of app/views/devise/sessions/new.html.erb -#}
+{% extends "layouts/application.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="agency-auth max-w-lg mx-auto">
+  <p class="agency-eyebrow text-center">{{ t('agency.workspace') }}</p>
+  <h1 class="agency-display text-4xl text-center">{{ t('sign_in') }}</h1>
+  <form data-turbo="{{ 'false' if redir else 'true' }}" class="space-y-6" id="new_user" action="/sign_in" accept-charset="UTF-8" method="post"><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+    {% if redir %}<input type="hidden" name="redir" id="redir" value="{{ redir }}" />{% endif %}
+    <div class="space-y-2" dir="auto">
+      <div class="form-control">
+        <label class="label" for="user_email">{{ t('email') }}</label>
+        <input autofocus="autofocus" autocomplete="email" class="base-input" type="email" {% if email %}value="{{ email }}" {% endif %}name="user[email]" id="user_email" />
+      </div>
+      <div class="form-control">
+        <label class="label" for="user_password">{{ t('password') }}</label>
+        <input autocomplete="current-password" class="base-input" type="password" name="user[password]" id="user_password" />
+      </div>
+    </div>
+    <div class="form-control">
+      <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('sign_in'), disabled_with=t('signing_in')) }}</button>
+    </div>
+</form>
+  {% with controller = 'sessions' %}{% include "devise/shared/_links.html" %}{% endwith %}
+</div>
+{% endblock %}

@@ -1,0 +1,15 @@
+{#- Port of app/views/shared/_test_alert.html.erb -#}
+{% import "shared/_button_title.html" as buttons %}
+{% if signed_in and impersonating and testing_account %}
+  <div class="hidden md:flex alert py-1 text-sm font-medium gap-x-2  whitespace-nowrap">
+    <a href="/settings/testing_api" data-turbo-frame="modal" class="link font-semibold flex">
+      {{ svg_icon('code_circle', class='w-5 h-5 mr-1') }}
+      <span>{{ t('test_mode') }}</span>
+    </a>
+    <span>
+      |
+    </span>
+    <form class="button_to" method="post" action="/testing_account"><input type="hidden" name="_method" value="delete" /><button class="inline flex" type="submit">{{ buttons.button_title(title='<span class="link">' ~ (t('exit') | escape) ~ '</span>
+        <span>&times;</span>' | safe, disabled_with=t('leave')) }}</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /></form>
+  </div>
+{% endif %}

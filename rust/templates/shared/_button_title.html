@@ -1,0 +1,20 @@
+{#- Port of app/views/shared/_button_title.html.erb (the `button_title` helper). Pass
+    translated strings: imported macros do not see the caller's locale. -#}
+{% macro button_title(title, disabled_with, title_class='', icon=none, icon_disabled=none) -%}
+<span class="enabled">
+  <span class="flex items-center justify-center space-x-2">
+    {{ icon or '' }}
+    {% if title %}
+      <span class="{{ title_class }}">{{ title }}</span>
+    {% endif %}
+  </span>
+</span>
+<span class="disabled">
+  <span class="flex items-center justify-center space-x-2">
+    {{ icon_disabled or svg_icon('loader', class='w-5 h-5 animate-spin') }}
+    {% if disabled_with %}
+      <span class="{{ title_class }}">{{ disabled_with }}...</span>
+    {% endif %}
+  </span>
+</span>
+{%- endmacro %}

@@ -23,8 +23,8 @@ async fn main() -> anyhow::Result<()> {
         None => anyhow::bail!("database is not migrated (schema_migrations is empty)"),
     }
 
-    // Rust-owned tables (job queue); the Rails schema is untouched.
-    loco_jobs::migrate(&db).await?;
+    // Rust-owned tables (job queue, sessions); the Rails schema is untouched.
+    loco_db::migrate(&db).await?;
 
     let bind = config.bind;
     let job_concurrency = config.job_concurrency;
@@ -48,16 +48,36 @@ async fn main() -> anyhow::Result<()> {
         ))
     });
 
+    // Expired sessions are only skipped on lookup; remove them hourly.
+    let cleanup_db = state.db.clone();
+    let cleanup_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_hours(1));
+        loop {
+            tokio::select! {
+                () = cleanup_shutdown.cancelled() => break,
+                _ = interval.tick() => {
+                    if let Err(err) = loco_db::sessions::delete_expired(&cleanup_db).await {
+                        tracing::warn!(%err, "deleting expired sessions failed");
+                    }
+                }
+            }
+        }
+    });
+
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(addr = %bind, "listening");
 
     let server_shutdown = shutdown.clone();
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(async move {
-            shutdown_signal().await;
-            server_shutdown.cancel();
-        })
-        .await?;
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        server_shutdown.cancel();
+    })
+    .await?;
 
     if let Some(workers) = workers {
         workers.await?;

@@ -49,7 +49,7 @@ fn registry() -> Registry<Ctx> {
         .register::<Fails>()
 }
 
-#[sqlx::test(migrator = "loco_jobs::MIGRATOR")]
+#[sqlx::test(migrator = "loco_db::MIGRATOR")]
 async fn runs_and_deletes_successful_jobs(db: PgPool) {
     let ctx = Ctx::default();
     enqueue(&db, &Succeeds { n: 3 }, EnqueueOptions::default())
@@ -68,7 +68,7 @@ async fn runs_and_deletes_successful_jobs(db: PgPool) {
     assert_eq!(left, 0);
 }
 
-#[sqlx::test(migrator = "loco_jobs::MIGRATOR")]
+#[sqlx::test(migrator = "loco_db::MIGRATOR")]
 async fn retries_then_marks_failed(db: PgPool) {
     let ctx = Ctx::default();
     let id = enqueue(&db, &Fails, EnqueueOptions::default())
@@ -101,7 +101,7 @@ async fn retries_then_marks_failed(db: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "loco_jobs::MIGRATOR")]
+#[sqlx::test(migrator = "loco_db::MIGRATOR")]
 async fn enqueue_in_rolled_back_transaction_is_discarded(db: PgPool) {
     let mut tx = db.begin().await.unwrap();
     enqueue(&mut *tx, &Succeeds { n: 1 }, EnqueueOptions::default())
@@ -118,7 +118,7 @@ async fn enqueue_in_rolled_back_transaction_is_discarded(db: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "loco_jobs::MIGRATOR")]
+#[sqlx::test(migrator = "loco_db::MIGRATOR")]
 async fn workers_drain_queue_and_stop_on_shutdown(db: PgPool) {
     let ctx = Ctx::default();
     for _ in 0..20 {

@@ -23,6 +23,8 @@ pub struct Config {
     pub production: bool,
     /// Background job worker slots in this process (`JOB_CONCURRENCY`, 0 disables).
     pub job_concurrency: usize,
+    /// `FORCE_SSL`: secure cookies (Rails `config.force_ssl`).
+    pub force_ssl: bool,
 }
 
 impl Config {
@@ -68,6 +70,7 @@ impl Config {
             job_concurrency: var("JOB_CONCURRENCY")
                 .map_or(Ok(5), |n| n.parse())
                 .context("invalid JOB_CONCURRENCY")?,
+            force_ssl: var("FORCE_SSL").is_some_and(|v| v != "false"),
         })
     }
 }

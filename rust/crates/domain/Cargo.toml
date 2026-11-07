@@ -6,6 +6,18 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
+rand = "0.10.3"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+rsa = { version = "0.9.10", features = ["getrandom", "pem"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+time = "0.3.55"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+x509-parser = { version = "0.18.1", features = ["verify"] }

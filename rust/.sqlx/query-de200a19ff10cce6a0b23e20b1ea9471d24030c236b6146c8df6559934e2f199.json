@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET consumed_timestep = $2, updated_at = now() AT TIME ZONE 'UTC'\n         WHERE id = $1 AND (consumed_timestep IS NULL OR consumed_timestep < $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "de200a19ff10cce6a0b23e20b1ea9471d24030c236b6146c8df6559934e2f199"
+}

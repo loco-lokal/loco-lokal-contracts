@@ -1,0 +1,67 @@
+{#- Port of app/views/shared/_navbar.html.erb (with _navbar_buttons). Settings pages are
+    ported in Phase 6. -#}
+<nav class="agency-navbar max-w-6xl mx-auto flex items-center justify-between">
+  <div class="flex items-center space-x-4">
+    <a href="/" class="text-2xl font-bold items-center flex space-x-2">
+      {% include "shared/_title.html" %}
+    </a>
+  </div>
+  {% if signed_in %}
+    <div class="space-x-4 flex items-center">
+        <div class="flex items-center justify-center space-x-4 mr-1">
+          {% include "shared/_test_alert.html" %}
+          <a class="hidden md:inline-flex font-medium text-lg" id="account_settings_button" href="/settings/profile">{{ t('settings') }}</a>
+        </div>
+      <div class="dropdown dropdown-end">
+        <label tabindex="0" class="agency-avatar cursor-pointer rounded-full p-2 w-9 justify-center flex">
+          <span class="text-sm align-text-top">{{ current_user.initials }}</span>
+        </label>
+        <ul tabindex="0" class="z-10 dropdown-content p-2 mt-2 shadow menu text-base bg-base-100 rounded-box text-right" style="min-width: 160px;">
+          <li class="md:hidden">
+            <a class="flex items-center" href="/settings">
+              {{ svg_icon('adjustments', class='w-5 h-5 flex-shrink-0 stroke-2') }}
+              <span class="mr-1">{{ t('settings') }}</span>
+</a>          </li>
+          <li class="hidden md:list-item">
+            <a class="flex items-center" href="/settings/profile">
+              {{ svg_icon('adjustments', class='w-5 h-5 flex-shrink-0 stroke-2') }}
+              <span class="mr-1">{{ t('profile') }}</span>
+</a>          </li>
+            <li>
+              <a class="flex items-center" href="/settings/esign">
+                {{ svg_icon('zoom_check', class='w-5 h-5 flex-shrink-0 stroke-2') }}
+                <span class="mr-1 whitespace-nowrap">{{ t('verify_pdf') }}</span>
+</a>            </li>
+          {% if not impersonating or testing_account %}
+            <form class="w-full py-1" action="/testing_account" accept-charset="UTF-8" method="post">{% if testing_account %}<input type="hidden" name="_method" value="delete" />{% endif %}<input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+              <label class="flex items-center pl-6 pr-4 py-2 border-y border-base-300 -ml-2 -mr-2" for="testing_toggle">
+                <submit-form data-on="change" class="flex">
+                  <input name="testing_toggle" type="hidden" value="0" /><input class="toggle" {% if testing_account %}checked="checked" {% endif %}style="height: 0.885rem; width: 1.35rem; --handleoffset: 0.395rem; margin-left: -2px; margin-right: 8px" type="checkbox" value="1" name="testing_toggle" id="testing_toggle" />
+                </submit-form>
+                <span class="whitespace-nowrap">
+                  {{ t('test_mode') }}
+                </span>
+              </label>
+</form>          {% endif %}
+          <li>
+            <button form="destroy_user_session_form">
+              {{ svg_icon('logout', class='w-5 h-5 flex-shrink-0 stroke-2 inline') }}
+              <span class="whitespace-nowrap">{{ t('sign_out') }}</span>
+            </button>
+            <form id="destroy_user_session_form" data-turbo="false" class="hidden" method="post" action="/sign_out"><input type="hidden" name="_method" value="delete" /><button type="submit"></button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /></form>
+          </li>
+        </ul>
+      </div>
+    </div>
+  {% else %}
+    <div class="flex space-x-2">
+      {% if request_path != '/sign_in' and request_path != '/setup' %}
+        <a class="font-medium text-lg" href="/sign_in{% if lang %}?lang={{ lang | urlencode }}{% endif %}">
+          <span class="flex items-center justify-center space-x-1">
+            {{ svg_icon('login', class='w-6 h-6') }}
+            <span>{{ t('sign_in') }}</span>
+          </span>
+</a>      {% endif %}
+    </div>
+  {% endif %}
+</nav>

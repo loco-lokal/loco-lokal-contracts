@@ -22,6 +22,7 @@ fn test_config(secret_key_base: &str) -> Config {
         app_root: PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../..")),
         production: false,
         job_concurrency: 0,
+        force_ssl: false,
     }
 }
 

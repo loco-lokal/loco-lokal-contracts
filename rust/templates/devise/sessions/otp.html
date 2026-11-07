@@ -1,0 +1,23 @@
+{#- Port of app/views/devise/sessions/otp.html.erb with _otp_form.html.erb -#}
+{% extends "layouts/application.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="agency-auth max-w-lg mx-auto">
+  <h1 class="text-4xl font-bold text-center mt-8">
+    {{ t('sign_in') }}
+  </h1>
+    <form data-turbo="{{ 'false' if redir else 'true' }}" class="space-y-6" id="new_user" action="/sign_in" accept-charset="UTF-8" method="post"><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+      <input value="{{ email }}" autocomplete="off" type="hidden" name="user[email]" id="user_email" />
+      <input value="{{ password }}" autocomplete="off" type="hidden" name="user[password]" id="user_password" />
+      {% if redir %}
+        <input type="hidden" name="redir" id="redir" value="{{ redir }}" />
+      {% endif %}
+      <div class="form-control">
+  <label class="label" for="user_otp_attempt">{{ t('two_factor_code_from_authenticator_app') }}</label>
+  <input type="text" name="user[otp_attempt]" id="user_otp_attempt" autofocus="autofocus" autocomplete="off" inputmode="numeric" placeholder="XXXXXX" required="required" class="base-input" />
+</div>
+      <div class="form-control">
+        <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('sign_in'), disabled_with=t('signing_in')) }}</button>
+      </div>
+</form></div>
+{% endblock %}

@@ -8,6 +8,7 @@
 //! - `svg_icon(name, class="")`
 //! - `javascript_pack_tag(entry, defer=true)`, `stylesheet_pack_tag(entry, media="all", turbo_track=none)`
 //! - `csrf_meta_tags()`: uses `csrf_token` from the render context
+//! - `strip_links` filter: removes `<a>` tags but keeps their text (Rails `strip_links`)
 
 pub mod assets;
 pub mod i18n;
@@ -26,8 +27,9 @@ pub use icons::Icons;
 pub struct ViewsConfig {
     pub templates_dir: PathBuf,
     pub icons_dir: PathBuf,
-    /// Rails' `config/locales`; every `*.yml` in it is loaded.
-    pub locales_dir: PathBuf,
+    /// Directories whose `*.yml` files are loaded in order, later ones overriding earlier
+    /// keys: the gem translations Rails provides (`rust/data/locales`) and `config/locales`.
+    pub locales_dirs: Vec<PathBuf>,
     pub manifest_file: PathBuf,
     /// Re-read templates, icons, and the asset manifest when they change (development).
     pub reload: bool,
@@ -40,7 +42,7 @@ impl ViewsConfig {
         Self {
             templates_dir: root.join("rust/templates"),
             icons_dir: root.join("app/views/icons"),
-            locales_dir: root.join("config/locales"),
+            locales_dirs: vec![root.join("rust/data/locales"), root.join("config/locales")],
             manifest_file: root.join("public/packs/manifest.json"),
             reload,
         }
@@ -63,7 +65,11 @@ pub struct Views {
 
 impl Views {
     pub fn new(config: &ViewsConfig) -> Result<Self, ViewsError> {
-        let i18n = Arc::new(I18n::load_dir(&config.locales_dir)?);
+        let mut i18n = I18n::default();
+        for dir in &config.locales_dirs {
+            i18n.extend(I18n::load_dir(dir)?);
+        }
+        let i18n = Arc::new(i18n);
         let assets = Arc::new(Assets::new(config.manifest_file.clone(), config.reload));
         let icons = Arc::new(Icons::new(config.icons_dir.clone(), config.reload));
 
@@ -147,6 +153,8 @@ impl Views {
             },
         );
 
+        env.add_filter("strip_links", strip_links_filter);
+
         env.add_function("csrf_meta_tags", |state: &State| -> Value {
             let token = state
                 .lookup("csrf_token")
@@ -219,6 +227,42 @@ fn translate(i18n: &I18n, state: &State, key: &str, kwargs: &Kwargs) -> Result<V
     })
 }
 
+fn strip_links_filter(value: &Value) -> Value {
+    let text = strip_links(&value.to_string());
+    if value.is_safe() {
+        Value::from_safe_string(text)
+    } else {
+        Value::from(text)
+    }
+}
+
+/// `strip_links`: drops `<a ...>` and `</a>` tags, keeping the link text.
+fn strip_links(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find('<') {
+        out.push_str(&rest[..start]);
+        let tag = &rest[start..];
+        let is_link = tag.len() > 2
+            && (tag[1..].starts_with("/a")
+                || tag[1..].starts_with('a')
+                || tag[1..].starts_with('A'))
+            && tag[1..]
+                .trim_start_matches('/')
+                .chars()
+                .nth(1)
+                .is_none_or(|c| c == '>' || c.is_whitespace());
+        if let (true, Some(end)) = (is_link, tag.find('>')) {
+            rest = &tag[end + 1..];
+        } else {
+            out.push('<');
+            rest = &tag[1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Rails shows the humanized last key segment when a translation is missing.
 fn missing_translation(key: &str) -> String {
     let last = key.rsplit('.').next().unwrap_or(key).replace('_', " ");
@@ -227,4 +271,18 @@ fn missing_translation(key: &str) -> String {
         .next()
         .map(|c| c.to_uppercase().chain(chars).collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_links;
+
+    #[test]
+    fn strips_only_links() {
+        assert_eq!(
+            strip_links(r#"Sent using <a href="https://x.test">DocuSeal</a> <b>software</b>."#),
+            "Sent using DocuSeal <b>software</b>."
+        );
+        assert_eq!(strip_links("<abbr>a</abbr> 1 < 2"), "<abbr>a</abbr> 1 < 2");
+    }
 }

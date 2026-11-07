@@ -1,0 +1,42 @@
+{#- Port of app/views/devise/passwords/edit.html.erb (also used, with other copy, by
+    app/views/invitations/edit.html.erb through `invitation`). -#}
+{% extends "layouts/application.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+{% if invitation %}
+<div class="max-w-xl mx-auto px-2">
+  <h1 class="flex text-4xl font-bold items-center justify-center my-8 space-x-2">
+    {{ svg_icon('waving_hand', class='h-10 w-10') }}
+    <span>{{ t('welcome_to_product_name', product_name=product_name) }}</span>
+  </h1>
+{% else %}
+<div class="agency-auth max-w-lg mx-auto">
+  <h1 class="text-4xl font-bold text-center mt-8">
+    {{ t('change_your_password') }}
+  </h1>
+{% endif %}
+  <form class="space-y-6" id="new_user" action="{{ '/invitation' if invitation else '/password' }}" accept-charset="UTF-8" method="post"><input type="hidden" name="_method" value="put" /><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+    <div class="space-y-2">
+      {% include "devise/shared/_error_messages.html" %}
+      <input value="{{ reset_password_token }}" autocomplete="off" type="hidden" name="user[reset_password_token]" id="user_reset_password_token" />
+      <div class="form-control">
+        <label class="label" for="user_password">{{ t('set_password') if invitation else t('new_password') }}</label>
+        <input autofocus="autofocus" autocomplete="new-password" class="base-input" type="password" name="user[password]" id="user_password" />
+          <label class="label">
+            <span class="label-text">({{ t('minimum_password_length_characters_minimum', minimum_password_length=minimum_password_length) }})</span>
+          </label>
+      </div>
+      <div class="form-control">
+        <label class="label" for="user_password_confirmation">{{ t('confirm_password') if invitation else t('confirm_new_password') }}</label>
+        <input autocomplete="new-password" class="base-input" type="password" name="user[password_confirmation]" id="user_password_confirmation" />
+      </div>
+    </div>
+    <div class="form-control">
+      {% if invitation %}
+      <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('save_password_and_sign_in'), disabled_with=t('saving')) }}</button>
+      {% else %}
+      <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('change_my_password'), disabled_with=t('changing_password')) }}</button>
+      {% endif %}
+    </div>
+</form></div>
+{% endblock %}

@@ -5,6 +5,12 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # Marvin attack: timing side channel in `rsa` decryption and signing. `rsa` only
+  # generates the e-signing keys at first-run setup (loco-domain::certificates); ring
+  # does the signing. Revisit if `rsa` is used for private-key operations (Phase 4).
+  { id = "RUSTSEC-2023-0071", reason = "rsa is only used for key generation" },
+]
 
 [licenses]
 version = 2

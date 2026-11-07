@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM rust_sessions WHERE id_digest = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "502cf8a19128a06bdc1d685f87c5da7cb5af4492240af1bc4bdfc7c3f5c7bc7d"
+}

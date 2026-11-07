@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO rust_sessions (id_digest, user_id, auth_salt, data, expires_at)\n         VALUES ($1, $2, $3, $4, $5)\n         ON CONFLICT (id_digest) DO UPDATE SET\n            user_id = EXCLUDED.user_id,\n            auth_salt = EXCLUDED.auth_salt,\n            data = EXCLUDED.data,\n            expires_at = EXCLUDED.expires_at,\n            updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2b02bbcf4cdbfefcfb54a3531684438a7bf47ee8a7aec9dfece3038b5adda6e7"
+}

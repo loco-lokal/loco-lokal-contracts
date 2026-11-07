@@ -1,6 +1,6 @@
 //! Shared application state and its construction at boot.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
 use loco_db::PgPool;
@@ -14,6 +14,11 @@ use crate::config::Config;
 /// `EncryptedConfig` keys (`app/models/encrypted_config.rb`).
 pub const FILES_STORAGE_KEY: &str = "active_storage";
 pub const EMAIL_SMTP_KEY: &str = "action_mailer_smtp";
+pub const APP_URL_KEY: &str = "app_url";
+pub const ESIGN_CERTS_KEY: &str = "esign_certs";
+
+/// `Docuseal::DEFAULT_APP_URL` without `APP_URL`.
+const FALLBACK_APP_URL: &str = "http://localhost:3000";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -23,6 +28,9 @@ pub struct AppState {
     pub storage: Storage,
     pub views: Views,
     pub mailer: Mailer,
+    /// `Docuseal.default_url_options` as an origin (`http://host[:port]`).
+    default_url: Arc<RwLock<String>>,
+    pub rate_limit: crate::rate_limit::RateLimit,
 }
 
 impl AppState {
@@ -42,14 +50,49 @@ impl AppState {
         let mailer =
             Mailer::new(mail_delivery(&db, &secrets).await?).context("configuring SMTP")?;
 
-        Ok(Self {
+        let state = Self {
             db,
             config: Arc::new(config),
             secrets,
             storage,
             views,
             mailer,
-        })
+            default_url: Arc::new(RwLock::new(FALLBACK_APP_URL.to_owned())),
+            rate_limit: crate::rate_limit::RateLimit::default(),
+        };
+        state.refresh_default_url().await?;
+        Ok(state)
+    }
+
+    /// The app's origin for absolute links, e.g. `http://localhost:3000`.
+    #[must_use]
+    pub fn default_url(&self) -> String {
+        self.default_url.read().expect("lock").clone()
+    }
+
+    /// `Docuseal.refresh_default_url_options!`: `APP_URL`, else the first account's stored
+    /// `app_url`, else `http://localhost:3000`.
+    pub async fn refresh_default_url(&self) -> anyhow::Result<()> {
+        let value = match &self.config.app_url {
+            Some(url) => url.clone(),
+            None => match loco_db::first_encrypted_config(&self.db, APP_URL_KEY).await? {
+                Some(row) => match decrypt_json(&self.secrets, &row.value)? {
+                    serde_json::Value::String(url) => url,
+                    _ => FALLBACK_APP_URL.to_owned(),
+                },
+                None => FALLBACK_APP_URL.to_owned(),
+            },
+        };
+
+        let origin = url::Url::parse(&value)
+            .ok()
+            .filter(url::Url::has_host)
+            .map_or_else(
+                || FALLBACK_APP_URL.to_owned(),
+                |url| url.origin().ascii_serialization(),
+            );
+        *self.default_url.write().expect("lock") = origin;
+        Ok(())
     }
 }
 
@@ -91,7 +134,10 @@ async fn mail_delivery(db: &PgPool, secrets: &RailsSecrets) -> anyhow::Result<De
     }
 }
 
-fn decrypt_json(secrets: &RailsSecrets, encrypted: &str) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn decrypt_json(
+    secrets: &RailsSecrets,
+    encrypted: &str,
+) -> anyhow::Result<serde_json::Value> {
     let json = secrets.encryptor.decrypt(encrypted)?;
     Ok(serde_json::from_str(&json)?)
 }

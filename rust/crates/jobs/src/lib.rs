@@ -1,6 +1,6 @@
 //! Postgres-backed background jobs, replacing Sidekiq and Redis.
 //!
-//! - Jobs live in `rust_jobs` and are claimed with `FOR UPDATE SKIP LOCKED`, so any number
+//! - Jobs live in `rust_jobs` (created by `rust/migrations`, see `loco_db::migrate`) and are claimed with `FOR UPDATE SKIP LOCKED`, so any number
 //!   of workers and processes can share a queue.
 //! - [`enqueue`] takes any executor, so a job can be enqueued inside the transaction that
 //!   creates the data it works on. It runs only if that transaction commits.
@@ -17,14 +17,7 @@ use serde_json::Value;
 use sqlx::{PgExecutor, PgPool, postgres::PgListener};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
-pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-
 const NOTIFY_CHANNEL: &str = "rust_jobs";
-
-/// Applies the job table migration.
-pub async fn migrate(db: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
-    MIGRATOR.run(db).await
-}
 
 /// A job type: its payload is the struct itself, serialized as JSON.
 pub trait Job: Serialize + DeserializeOwned + Send + 'static {

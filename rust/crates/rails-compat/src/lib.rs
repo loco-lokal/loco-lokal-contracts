@@ -4,12 +4,14 @@
 //! - `encryption`: Active Record `encrypts` columns (AES-256-GCM in a JSON envelope)
 //! - `message_verifier`: `ActiveSupport::MessageVerifier` (signed ids and blob ids)
 //! - `password`: Devise bcrypt password hashes
+//! - `devise`: reset-token digests, friendly tokens, and TOTP codes
 //! - `csrf`: masked per-session authenticity tokens, as `form_authenticity_token` produces
 //!
 //! [`RailsSecrets`] derives every key from `SECRET_KEY_BASE` / `ENCRYPTION_SECRET` the way
 //! `config/environments/production.rb` and the Rails railties do.
 
 pub mod csrf;
+pub mod devise;
 pub mod encryption;
 pub mod key_generator;
 pub mod message_verifier;

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET reset_password_token = $2,\n                          reset_password_sent_at = now() AT TIME ZONE 'UTC',\n                          updated_at = now() AT TIME ZONE 'UTC'\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "80cc3840669ff6bc7cd7cf3f754632692c74da174f1a880551935385eee10675"
+}

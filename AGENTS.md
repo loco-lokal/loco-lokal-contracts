@@ -128,7 +128,7 @@ A Rust replacement for the Rails backend is in progress under `rust/`. It is a C
 
 - Rails migrations own the schema until cutover. After they change, regenerate `rust/schema/baseline.sql` (`rust/scripts/dump-schema.sh`) and `rust/.sqlx` (`cargo sqlx prepare --workspace`).
 - Rust code must stay compatible with Rails-produced data: the existing tables, the Active Storage layout, encrypted columns, signed ids, and Devise hashes. `crates/rails-compat` is checked against values Rails generated (`rust/scripts/generate-golden.sh`).
-- Rust-only tables (such as the `rust_jobs` queue) are added through `rust/crates/*/migrations`, never through Rails migrations.
+- Rust-only tables (such as the `rust_jobs` queue and `rust_sessions`) are added through `rust/migrations`, never through Rails migrations.
 - Templates in `rust/templates/` are ports of `app/views`. The Rust server reads `app/views/icons`, `app/views/errors`, `config/locales`, and `public/` directly, so keep those in place until cutover.
 - CI runs the `Rust` job (fmt, clippy `-D warnings`, nextest, sqlx offline check, cargo-deny).
 

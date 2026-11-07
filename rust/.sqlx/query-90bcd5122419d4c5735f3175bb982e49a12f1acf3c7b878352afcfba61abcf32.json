@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id_digest, user_id, auth_salt, data, expires_at\n         FROM rust_sessions WHERE id_digest = $1 AND expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id_digest",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rust_sessions",
+            "name": "id_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "rust_sessions",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "auth_salt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rust_sessions",
+            "name": "auth_salt"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "data",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "rust_sessions",
+            "name": "data"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "rust_sessions",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "90bcd5122419d4c5735f3175bb982e49a12f1acf3c7b878352afcfba61abcf32"
+}

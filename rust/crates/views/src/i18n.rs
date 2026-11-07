@@ -71,6 +71,11 @@ impl I18n {
         Ok(i18n)
     }
 
+    /// Adds `other`'s translations, replacing keys both define.
+    pub fn extend(&mut self, other: Self) {
+        self.merge(other);
+    }
+
     fn merge(&mut self, other: Self) {
         for (locale, entries) in other.locales {
             self.locales.entry(locale).or_default().extend(entries);

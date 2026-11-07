@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET encrypted_password = $2,\n                          reset_password_token = NULL,\n                          reset_password_sent_at = NULL,\n                          confirmed_at = CASE WHEN $3 THEN COALESCE(confirmed_at, now() AT TIME ZONE 'UTC')\n                                              ELSE confirmed_at END,\n                          updated_at = now() AT TIME ZONE 'UTC'\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62a11bb9ef3d1d2bf5bd1a7cb9385845d2a9a176934fd6be690812cd9152eb7a"
+}

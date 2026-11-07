@@ -1,0 +1,29 @@
+{#- Port of app/views/layouts/application.html.erb (Turbo Native and `?modal=` not ported yet) -#}
+<!DOCTYPE html>
+<html data-theme="docuseal" lang="{{ locale }}">
+  <head>
+    {% include "layouts/_head_tags.html" %}
+      <link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    {{ csrf_meta_tags() }}
+    <meta name="turbo-refresh-method" content="morph">
+    <meta name="turbo-refresh-scroll" content="preserve">
+    {{ javascript_pack_tag('application', defer=true) }}
+    {% if canonical_url %}
+      <link href="{{ canonical_url }}" rel="canonical">
+    {% endif %}
+    {{ stylesheet_pack_tag('application', media='all', turbo_track='dynamic') }}
+  </head>
+  <body class="agency-ui agency-app">
+      <turbo-frame id="modal"></turbo-frame>
+    <turbo-frame id="drawer"></turbo-frame>
+    {% include "shared/_navbar.html" %}
+    <main class="agency-workspace max-w-6xl mx-auto px-4 md:px-2 mb-8">
+      {% block content %}{% endblock %}
+    </main>
+      <footer class="agency-footer">
+        {% include "shared/_powered_by.html" %}
+      </footer>
+    {% if flash and (flash.notice or flash.alert) %}{% include "shared/_flash.html" %}{% endif %}
+  </body>
+</html>

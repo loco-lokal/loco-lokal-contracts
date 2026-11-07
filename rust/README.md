@@ -41,10 +41,10 @@ cd rust && cargo sqlx prepare --workspace    # rust/.sqlx offline query data
 
 Also update `EXPECTED_SCHEMA_VERSION` in `crates/db/src/lib.rs`.
 
-Tables that only the Rust backend uses (currently the `rust_jobs` queue) live in `crates/*/migrations/`. The server applies them at boot, and they are kept out of `baseline.sql`. Apply them to the dev database by hand when query macros need them:
+Tables that only the Rust backend uses (the `rust_jobs` queue and `rust_sessions`) live in `migrations/`. The server applies them at boot, and they are kept out of `baseline.sql`. Apply them to the dev database by hand when query macros need them:
 
 ```sh
-cd rust && sqlx migrate run --source crates/jobs/migrations
+cd rust && sqlx migrate run --source migrations
 ```
 
 ## Golden fixtures
@@ -84,7 +84,11 @@ It also reads these, which Rails doesn't use:
 
 To send development mail to Mailpit, add `SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false`.
 
-Pages are minijinja ports of `app/views` in `rust/templates/`. They use the Shakapacker asset build from `public/packs/manifest.json`, the icons in `app/views/icons/`, and the translations in `config/locales/`.
+Pages are minijinja ports of `app/views` in `rust/templates/`. They use the Shakapacker asset build from `public/packs/manifest.json`, the icons in `app/views/icons/`, and the translations in `config/locales/`. Build the assets once (and again after JavaScript or CSS changes) with Node and Yarn; no Ruby is needed:
+
+```sh
+scripts/build-assets.sh              # development; pass `production` for minified bundles
+```
 
 ## Checks (same as CI)
 

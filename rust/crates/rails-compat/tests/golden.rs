@@ -4,7 +4,9 @@
 use std::sync::LazyLock;
 
 use chrono::{TimeZone, Utc};
-use loco_rails_compat::{RailsSecrets, message_verifier::VerifyError, password, signed_id_purpose};
+use loco_rails_compat::{
+    RailsSecrets, devise, message_verifier::VerifyError, password, signed_id_purpose,
+};
 use serde_json::{Value, json};
 
 static GOLDEN: LazyLock<Value> = LazyLock::new(|| {
@@ -158,4 +160,37 @@ fn verifies_devise_bcrypt_hashes() {
     let ours = password::hash("new password", None).unwrap();
     assert!(ours.starts_with("$2a$10$"));
     assert!(password::verify("new password", &ours, None));
+}
+
+#[test]
+fn digests_devise_reset_tokens() {
+    let case = &GOLDEN["devise"]["reset_password_token"];
+    let generator = devise::TokenGenerator::new(s(&GOLDEN["secret_key_base"]));
+    assert_eq!(
+        generator.digest("reset_password_token", s(&case["raw"])),
+        s(&case["digest"])
+    );
+    assert_eq!(
+        devise::friendly_token().len(),
+        usize::try_from(GOLDEN["devise"]["friendly_token_length"].as_u64().unwrap()).unwrap()
+    );
+}
+
+#[test]
+fn matches_rotp_codes_and_provisioning_uri() {
+    let case = &GOLDEN["devise"]["otp"];
+    let totp = devise::Totp::new(s(&case["secret"])).unwrap();
+    let now = case["unix_time"].as_i64().unwrap();
+
+    assert_eq!(totp.at(now), s(&case["code"]));
+    assert_eq!(totp.at(now - 30), s(&case["code_previous_step"]));
+    assert_eq!(totp.verify(s(&case["code"]), now, None), Some(now / 30));
+    assert_eq!(
+        devise::Totp::provisioning_uri(
+            s(&case["secret"]),
+            "ana@example.test",
+            s(&GOLDEN["devise"]["product_name"])
+        ),
+        s(&case["provisioning_uri"])
+    );
 }

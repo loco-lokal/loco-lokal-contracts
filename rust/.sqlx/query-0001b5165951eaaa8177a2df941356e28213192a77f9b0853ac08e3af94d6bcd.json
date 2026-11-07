@@ -1,0 +1,102 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.id, a.uuid, a.name, a.timezone, a.locale, a.archived_at,\n                  COALESCE(l.account_type = 'testing', false) AS \"testing!\",\n                  (l.id IS NOT NULL) AS \"linked!\"\n           FROM accounts a\n           LEFT JOIN LATERAL (\n               SELECT id, account_type FROM account_linked_accounts\n               WHERE linked_account_id = a.id ORDER BY id LIMIT 1\n           ) l ON true\n           WHERE a.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "uuid"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "timezone",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "timezone"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "locale",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "locale"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "archived_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "archived_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "testing!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "linked!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "0001b5165951eaaa8177a2df941356e28213192a77f9b0853ac08e3af94d6bcd"
+}

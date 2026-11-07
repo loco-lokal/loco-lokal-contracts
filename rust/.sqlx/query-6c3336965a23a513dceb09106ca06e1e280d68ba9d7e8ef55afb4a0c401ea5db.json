@@ -1,0 +1,304 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, uuid, account_id, first_name, last_name, email, role, encrypted_password,\n                    reset_password_token, reset_password_sent_at, sign_in_count,\n                    current_sign_in_at, last_sign_in_at, current_sign_in_ip, last_sign_in_ip,\n                    failed_attempts, locked_at, archived_at, otp_secret, consumed_timestep,\n                    otp_required_for_login, confirmed_at, created_at, updated_at\n             FROM users WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "uuid",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "uuid"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "account_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "first_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "first_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "last_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "last_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "email",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "email"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "role",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "role"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "encrypted_password",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "encrypted_password"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "reset_password_token",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "reset_password_token"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "reset_password_sent_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "reset_password_sent_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "sign_in_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "sign_in_count"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "current_sign_in_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "current_sign_in_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "last_sign_in_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "last_sign_in_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "current_sign_in_ip",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "current_sign_in_ip"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "last_sign_in_ip",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "last_sign_in_ip"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "failed_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "failed_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "locked_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "locked_at"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "archived_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "archived_at"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "otp_secret",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "otp_secret"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "consumed_timestep",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "consumed_timestep"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "otp_required_for_login",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "otp_required_for_login"
+          }
+        }
+      },
+      {
+        "ordinal": 21,
+        "name": "confirmed_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "confirmed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "created_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 23,
+        "name": "updated_at",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "6c3336965a23a513dceb09106ca06e1e280d68ba9d7e8ef55afb4a0c401ea5db"
+}

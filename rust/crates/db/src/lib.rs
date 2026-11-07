@@ -4,9 +4,21 @@
 //! checking against a migrated database, or the offline data in `rust/.sqlx/` when
 //! `SQLX_OFFLINE=true`.
 
+pub mod sessions;
+pub mod users;
+
 use std::time::Duration;
 
 pub use sqlx::PgPool;
+
+/// Tables only the Rust backend uses (`rust/migrations`): the job queue and sessions.
+/// They are kept out of `rust/schema/baseline.sql`.
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+
+/// Applies the Rust-owned migrations; the Rails schema is left alone.
+pub async fn migrate(db: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    MIGRATOR.run(db).await
+}
 use sqlx::postgres::PgPoolOptions;
 
 /// Latest Rails migration version this code was written against (`db/schema.rb`).
