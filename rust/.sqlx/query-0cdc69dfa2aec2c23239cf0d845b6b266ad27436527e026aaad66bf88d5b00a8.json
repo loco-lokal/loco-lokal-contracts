@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT event_name FROM lock_events WHERE key = $1 ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_name",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "lock_events",
+            "name": "event_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0cdc69dfa2aec2c23239cf0d845b6b266ad27436527e026aaad66bf88d5b00a8"
+}

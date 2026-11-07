@@ -179,7 +179,8 @@ def main():
                       (f"values[{uuids['Full Name']}]", "Hook"),
                       (f"values[{uuids['Signature']}]", json.loads(upload[1])["uuid"]), ("completed", "true")]
             return browser.request("POST", f"/s/{slug}", fields, files={})
-        # Result documents (in form.completed and submission.completed) come with Phase 4b.
+        # `documents` in form.completed and submission.completed are result PDFs (Phase 4b);
+        # `audit_log_url` stays null until the audit trail (Phase 4c).
         compare("form.started, form.completed, submission.completed", url_id, secret, complete, 3)
 
         declining = compare("submission.created (to decline)", url_id, secret, create, 1)

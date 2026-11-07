@@ -6,6 +6,7 @@
 pub mod actions;
 pub mod completion;
 pub mod pages;
+pub mod results;
 pub mod submit;
 
 use axum::{

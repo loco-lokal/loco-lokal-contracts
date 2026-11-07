@@ -12,14 +12,22 @@ through the Rails API and then, as the signers would:
 3. opens the completed page; and
 4. declines as the second party and opens the declined page.
 
+A second, single-party submission is then completed so that the submission completes and
+the result documents are signed.
+
 Responses are compared after normalizing tokens, slugs, uuids and times, and so are
-the rows the two backends stored (submitter state, events, completed submitters).
-Result documents are reported as "todo" until the Rust completion job generates them.
+the rows the two backends stored (submitter state, events, completed submitters, result
+documents). The result PDFs cannot match byte for byte (fonts are subset differently and
+the signatures differ), so each page is rendered for both backends and the images are
+compared (`pdftoppm` from poppler), and every signature must verify (`openssl cms`).
 """
 
+import base64
 import http.cookiejar
+import tempfile
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -151,7 +159,8 @@ def stored(submission_id):
            attachments: e.attachments.map {{ |a| [a.name, a.blob.content_type, a.blob.metadata.except('sha256')] }},
            events: e.submission_events.order(:id).map {{ |ev| [ev.event_type, ev.data.keys.sort] }},
            completed_submitters: CompletedSubmitter.where(submitter_id: e.id).count,
-           result_documents: [e.documents.count, CompletedDocument.where(submitter_id: e.id).count] }}
+           result_documents: e.documents.map {{ |d| [d.filename.to_s, d.content_type, d.metadata.keys.sort] }},
+           completed_documents: CompletedDocument.where(submitter_id: e.id).count }}
       end
       puts({{ completed: s.completed_at.present?, submitters: out }}.to_json)
     """
@@ -161,6 +170,82 @@ def stored(submission_id):
         cwd=ROOT, capture_output=True, text=True, check=True,
     )
     return json.dumps(json.loads(result.stdout.strip().splitlines()[-1]), indent=1)
+
+
+def result_pdfs(submission_id):
+    """Each submitter's result PDFs, read through Rails."""
+    script = f"""
+      s = Submission.find({submission_id})
+      puts(s.submitters.order(:id).map {{ |e| e.documents.map {{ |d| Base64.strict_encode64(d.download) }} }}.to_json)
+    """
+    result = subprocess.run(
+        ["docker", "compose", "-f", "compose.rust-dev.yml", "exec", "-T", "-w", "/app", "rails",
+         "bin/rails", "runner", script],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    return [[base64.b64decode(d) for d in docs] for docs in json.loads(result.stdout.strip().splitlines()[-1])]
+
+
+def render(pdf):
+    from PIL import Image
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "doc.pdf"
+        path.write_bytes(pdf)
+        subprocess.run(["pdftoppm", "-r", "60", "-png", str(path), str(Path(tmp) / "page")], check=True)
+        return [Image.open(p).convert("L").copy() for p in sorted(Path(tmp).glob("page*.png"))]
+
+
+def signatures(pdf):
+    """The number of signatures and how many verify. pdfsig's NSS cannot read the DocuSeal
+    certificate chain and reports even Rails' signatures as invalid, so each signature is
+    checked with `openssl cms -verify` over its byte ranges (chain trust not checked)."""
+    found = valid = 0
+    for match in re.finditer(rb"/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]", pdf):
+        a, b, c, d = map(int, match.groups())
+        if b == 1000000000000:  # an unfilled placeholder
+            continue
+        found += 1
+        contents = pdf[a + b:c].strip().strip(b"<>")
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "data").write_bytes(pdf[a:a + b] + pdf[c:c + d])
+            Path(tmp, "sig").write_bytes(bytes.fromhex(contents.decode()).rstrip(b"\0"))
+            result = subprocess.run(
+                ["openssl", "cms", "-verify", "-binary", "-noverify", "-inform", "DER",
+                 "-in", str(Path(tmp, "sig")), "-content", str(Path(tmp, "data")), "-out", os.devnull],
+                capture_output=True,
+            )
+        valid += result.returncode == 0
+    return found, valid
+
+
+def compare_pdfs(rails_id, rust_id, signed=False):
+    """Renders both backends' result PDFs and checks their signatures. With `signed`, each
+    document must carry at least one signature."""
+    global FAILURES
+    for index, (a_docs, b_docs) in enumerate(zip(result_pdfs(rails_id), result_pdfs(rust_id))):
+        for doc, (a, b) in enumerate(zip(a_docs, b_docs)):
+            label = f"result pdf {'signed ' if signed else ''}{index}.{doc}"
+            pages_a, pages_b = render(a), render(b)
+            if len(pages_a) != len(pages_b):
+                FAILURES += 1
+                print(f"FAIL {label}: {len(pages_a)} pages vs {len(pages_b)}")
+                continue
+            worst = 0.0
+            for x, y in zip(pages_a, pages_b):
+                if x.size != y.size:
+                    worst = 1.0
+                    break
+                from PIL import ImageChops
+
+                diff = ImageChops.difference(x, y)
+                changed = sum(1 for v in diff.getdata() if v > 64)
+                worst = max(worst, changed / (x.size[0] * x.size[1]))
+            sig_a, sig_b = signatures(a), signatures(b)
+            ok = worst < 0.002 and sig_a == sig_b and sig_b[0] == sig_b[1] and (sig_b[0] > 0 or not signed)
+            if not ok:
+                FAILURES += 1
+            print(f"{'ok  ' if ok else 'FAIL'} {label} [pixels differing {worst:.4%}, signatures rails {sig_a} rust {sig_b}]")
 
 
 def run(base, token, template_id, fields):
@@ -220,6 +305,33 @@ def run(base, token, template_id, fields):
     return first["submission_id"], steps
 
 
+def run_signed(base, token, template_id, fields):
+    """A single-party submission completed in one go: its result documents are signed."""
+    status, created = call(
+        RAILS, token, "POST", "/api/submissions",
+        {"template_id": template_id, "send_email": False,
+         "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"}]},
+    )
+    assert status == 200, created
+    signer = Browser(base)
+    s = created[0]["slug"]
+    signer.request("GET", f"/s/{s}")
+    upload = signer.request(
+        "POST", f"/s/{s}/upload", [("type", "signature")],
+        {"file": ("signature.png", "image/png", signature_png())},
+    )
+    status = signer.request(
+        "POST", f"/s/{s}",
+        [("_method", "put"), ("authenticity_token", signer.csrf),
+         (f"values[{fields['Full Name']}]", "Ana Example"),
+         (f"values[{fields['Signature']}]", json.loads(upload[1])["uuid"]),
+         ("completed", "true"), ("timezone", "Europe/Berlin")],
+        files={},
+    )
+    assert status[0] == 200, f"{base}: completing the single-party submission returned {status[0]}"
+    return created[0]["submission_id"]
+
+
 def blank_png():
     from PIL import Image
 
@@ -234,15 +346,14 @@ def main():
     fields = {f["name"]: f["uuid"] for f in template["fields"]}
     rails_id, rails = run(RAILS, token, template_id, fields)
     rust_id, rust = run(RUST, token, template_id, fields)
+    signed_ids = (run_signed(RAILS, token, template_id, fields),
+                  run_signed(RUST, token, template_id, fields))
     for label in rails:
         is_page = rails[label][1].lstrip().startswith("<")
         check(label, rails[label], rust[label], page if is_page else json_text)
 
     time.sleep(5)  # the completion jobs
-    a, b = json.loads(stored(rails_id)), json.loads(stored(rust_id))
-    # Result PDFs (and their completed_documents rows) come with Phase 4b.
-    gaps = [(x.pop("result_documents"), y.pop("result_documents")) for x, y in zip(a["submitters"], b["submitters"])]
-    a, b = json.dumps(a, indent=1), json.dumps(b, indent=1)
+    a, b = stored(rails_id), stored(rust_id)
     global FAILURES
     if a == b:
         print("ok   stored rows")
@@ -250,9 +361,16 @@ def main():
         FAILURES += 1
         print("FAIL stored rows")
         print(diff(a, b))
-    if any(x != y for x, y in gaps):
-        print(f"todo result documents [rails, rust] per submitter: {gaps} (Phase 4b)")
-    for submission_id in (rails_id, rust_id):
+    compare_pdfs(rails_id, rust_id)
+    a, b = (stored(i) for i in signed_ids)
+    if a == b:
+        print("ok   stored rows (signed)")
+    else:
+        FAILURES += 1
+        print("FAIL stored rows (signed)")
+        print(diff(a, b))
+    compare_pdfs(*signed_ids, signed=True)
+    for submission_id in (rails_id, rust_id, *signed_ids):
         call(RAILS, token, "DELETE", f"/api/submissions/{submission_id}")
     sys.exit(1 if FAILURES else 0)
 

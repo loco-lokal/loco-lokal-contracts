@@ -155,8 +155,23 @@ impl Storage {
         &self.default_service
     }
 
-    /// Uploads bytes to the default service and records the blob.
+    /// Uploads bytes to the default service and records the blob, marked `identified`
+    /// as `ActiveStorage::Blob.create_and_upload!` does.
     pub async fn create_and_upload(
+        &self,
+        db: &sqlx::PgPool,
+        data: Bytes,
+        filename: &str,
+        content_type: Option<&str>,
+        metadata: serde_json::Value,
+    ) -> Result<Blob, StorageError> {
+        self.create_and_upload_exact(db, data, filename, content_type, with_identified(metadata))
+            .await
+    }
+
+    /// Like [`Self::create_and_upload`], storing `metadata` as given: an attachment built
+    /// with `metadata:` replaces the blob's metadata.
+    pub async fn create_and_upload_exact(
         &self,
         db: &sqlx::PgPool,
         data: Bytes,
@@ -175,7 +190,7 @@ impl Storage {
                 key: &key,
                 filename,
                 content_type,
-                metadata: &with_identified(metadata),
+                metadata: &metadata,
                 service_name: &self.default_service,
                 byte_size: i64::try_from(data.len()).unwrap_or(i64::MAX),
                 checksum: &checksum,

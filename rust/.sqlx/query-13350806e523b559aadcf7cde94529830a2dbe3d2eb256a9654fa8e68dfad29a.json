@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO lock_events (key, event_name, created_at, updated_at)\n           VALUES ($1, $2, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13350806e523b559aadcf7cde94529830a2dbe3d2eb256a9654fa8e68dfad29a"
+}

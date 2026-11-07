@@ -193,7 +193,7 @@ def main():
             ("_method", "put"), ("authenticity_token", browser.csrf), *values,
             (f"values[{uuids['Signature']}]", json.loads(upload[1])["uuid"]), ("completed", "true")], files={})
         assert response[0] == 200, response
-    # The first party's copy of the documents (a completed email) comes with Phase 4b;
+    # The completed emails attach the audit trail, so they come with Phase 4c;
     # this case covers the invitation of the next party in a preserved order.
     signing_case(token, "next party invited after completion", {
         "template_id": t, "order": "preserved", "expected_invitations": 1,

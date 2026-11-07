@@ -133,10 +133,27 @@ Phase 4a ports the recipient signing form at `/s/:slug`:
 - The completion job: completed submitters, next-party invitations, and the `form.*` and `submission.completed` webhooks.
 - Active Storage disk URLs (`/disk/:encoded_key/*filename`).
 
+Phase 4b generates the result documents in the completion job (`signing/results.rs`, a port of `Submissions::GenerateResultAttachments` and `EnsureResultGenerated`). The PDF editing behind it is in `loco_pdf::edit`:
+
+- HexaPDF's text layout, with the same metrics, line wrapping and alignment.
+- GoNoto embedded as subset fonts, and Times, Helvetica and Courier with a custom encoding.
+- Rotating and flattening pages, annotations and form fields.
+- Incremental updates that keep earlier signatures valid.
+- `adbe.pkcs7.detached` signatures with the account's `esign_certs`.
+
+`scripts/fetch-fonts.sh` downloads the fonts into `rust/vendor/fonts`. Without them, text falls back to Helvetica, as it does in Rails. The PDFs differ from HexaPDF's byte for byte, so `signing.py` compares rendered pages and checks the signatures with poppler.
+
 These parts return 422 ("not supported yet") or are still missing:
 
-- Result documents, PDF signing and the completed emails that attach them (Phase 4b). The completion job records no `completed_documents`, and the `form.completed` and `submission.completed` webhooks send `documents: []` until then.
-- The audit trail (Phase 4c), sent as `audit_log_url: null`.
+- These result documents fail the completion job with "not supported yet":
+  - dynamic documents;
+  - two or more image documents (Rails merges them into one PDF);
+  - custom signing certificates;
+  - timestamp servers;
+  - PDF/A output.
+- Right-to-left text is drawn in logical order, where Rails reorders it visually.
+- Form fields that need their appearances generated (`NeedAppearances`) are left unflattened.
+- The audit trail (Phase 4c), sent as `audit_log_url: null`, and the completed emails that attach it.
 - The start form `/d/:slug` and resubmitting (Phase 4).
 - Email two-factor verification on the signing form (422), and the 2FA cookie checks.
 - Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.

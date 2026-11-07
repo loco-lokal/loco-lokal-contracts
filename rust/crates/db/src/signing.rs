@@ -336,3 +336,67 @@ pub async fn set_template_submitters(
     .await?;
     Ok(())
 }
+
+/// The `lock_events` names recorded for `key`, oldest first.
+pub async fn lock_event_names(db: impl PgExecutor<'_>, key: &str) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT event_name FROM lock_events WHERE key = $1 ORDER BY id",
+        key
+    )
+    .fetch_all(db)
+    .await?)
+}
+
+/// `LockEvent.create!(key:, event_name:)`; `false` when a unique `start`/`complete`
+/// already exists (`ActiveRecord::RecordNotUnique`).
+pub async fn create_lock_event(
+    db: impl PgExecutor<'_>,
+    key: &str,
+    event_name: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query!(
+        r#"INSERT INTO lock_events (key, event_name, created_at, updated_at)
+           VALUES ($1, $2, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))"#,
+        key,
+        event_name
+    )
+    .execute(db)
+    .await;
+    match result {
+        Ok(_) => Ok(true),
+        Err(sqlx::Error::Database(err)) if err.is_unique_violation() => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// `AccountConfig.where(key:).first_or_initialize.value`: the first account config with
+/// `key` in any account.
+pub async fn first_account_config(
+    db: impl PgExecutor<'_>,
+    key: &str,
+) -> Result<Option<serde_json::Value>, DbError> {
+    let value: Option<String> = sqlx::query_scalar!(
+        "SELECT value FROM account_configs WHERE key = $1 ORDER BY id LIMIT 1",
+        key
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(value.map(|v| serde_json::from_str(&v).unwrap_or(serde_json::Value::Null)))
+}
+
+/// `EncryptedConfig.find_by(account:, key:)&.value ||
+/// EncryptedConfig.find_by(key:).value`, still encrypted.
+pub async fn encrypted_config_with_fallback(
+    db: impl PgExecutor<'_>,
+    account_id: i64,
+    key: &str,
+) -> Result<Option<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT value FROM encrypted_configs WHERE key = $2
+           ORDER BY (account_id = $1) DESC, id LIMIT 1"#,
+        account_id,
+        key
+    )
+    .fetch_optional(db)
+    .await?)
+}
