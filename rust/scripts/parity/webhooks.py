@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from compare import RAILS, RUST
 from create import DATABASE_URL, rows
 from writes import call, check
+from signing import Browser, signature_png
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 HOST = os.environ.get("HOOK_HOST") or subprocess.run(
@@ -75,6 +77,15 @@ def wait_for(count, timeout=20):
     return result
 
 
+def mask_ip(value):
+    """Rails sees requests from the Docker bridge, the Rust server from localhost."""
+    if isinstance(value, dict):
+        return {k: ("<ip>" if k == "ip" and v else mask_ip(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [mask_ip(v) for v in value]
+    return value
+
+
 def summarize(requests, hmac_secret):
     result = []
     for r in requests:
@@ -87,7 +98,7 @@ def summarize(requests, hmac_secret):
             "user_agent": headers.get("user-agent"),
             "custom": headers.get("x-custom"),
             "signature_valid": hmac.compare_digest(expected, digest),
-            "body": json.loads(r["body"]),
+            "body": mask_ip(json.loads(r["body"])),
         })
     return sorted(result, key=lambda r: (r["body"]["event_type"], json.dumps(r["body"], sort_keys=True)))
 
@@ -141,6 +152,47 @@ def main():
         compare("form.viewed", url_id, secret, lambda base: call(
             base, token, "POST", "/api/submitter_form_views",
             {"submitter_slug": made["rails" if base == RAILS else "rust"]["slug"]}), 1)
+
+        # The signing form (`/s/:slug`): view, complete (single party), decline.
+        def signer(base):
+            name = "rails" if base == RAILS else "rust"
+            browser = Browser(base)
+            slug = made[name]["slug"]
+            body = browser.request("GET", f"/s/{slug}")[1]
+            return browser, slug, re.search(r'data-view-token="([^"]+)"', body).group(1)
+        signers = {}
+
+        def view(base):
+            signers[base] = signer(base)
+            browser, slug, token_ = signers[base]
+            return browser.request("POST", f"/s/{slug}/view", [("v", token_)])
+        compare("form.viewed (signing form)", url_id, secret, view, 1)
+
+        _, template = call(RAILS, token, "GET", f"/api/templates/{t}")
+        uuids = {f["name"]: f["uuid"] for f in template["fields"]}
+
+        def complete(base):
+            browser, slug, _ = signers[base]
+            upload = browser.request("POST", f"/s/{slug}/upload", [("type", "signature")],
+                                     {"file": ("signature.png", "image/png", signature_png())})
+            fields = [("_method", "put"), ("authenticity_token", browser.csrf),
+                      (f"values[{uuids['Full Name']}]", "Hook"),
+                      (f"values[{uuids['Signature']}]", json.loads(upload[1])["uuid"]), ("completed", "true")]
+            return browser.request("POST", f"/s/{slug}", fields, files={})
+        # Result documents (in form.completed and submission.completed) come with Phase 4b.
+        compare("form.started, form.completed, submission.completed", url_id, secret, complete, 3)
+
+        declining = compare("submission.created (to decline)", url_id, secret, create, 1)
+        for name in declining:
+            cleanup[name].append(declining[name]["submission_id"])
+
+        def decline(base):
+            browser = Browser(base)
+            slug = declining["rails" if base == RAILS else "rust"]["slug"]
+            browser.request("GET", f"/s/{slug}")
+            return browser.request("POST", f"/s/{slug}/decline",
+                                   [("authenticity_token", browser.csrf), ("reason", "No")])
+        compare("form.declined", url_id, secret, decline, 1)
 
         compare("submission.archived", url_id, secret, lambda base: call(
             base, token, "DELETE",

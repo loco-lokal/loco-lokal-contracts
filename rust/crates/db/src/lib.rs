@@ -9,6 +9,7 @@ mod json_text;
 pub mod records;
 pub mod search;
 pub mod sessions;
+pub mod signing;
 pub mod submissions;
 pub mod templates;
 pub mod users;
@@ -18,7 +19,7 @@ pub use json_text::JsonText;
 
 use std::time::Duration;
 
-pub use sqlx::PgPool;
+pub use sqlx::{PgConnection, PgPool};
 
 /// Tables only the Rust backend uses (`rust/migrations`): the job queue and sessions.
 /// They are kept out of `rust/schema/baseline.sql`.

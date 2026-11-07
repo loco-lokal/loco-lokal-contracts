@@ -13,6 +13,7 @@ rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pe
 rsa = { version = "0.9.10", features = ["getrandom", "pem"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+regex = "1.13.1"
 thiserror = "2.0.21"
 time = "0.3.55"
 

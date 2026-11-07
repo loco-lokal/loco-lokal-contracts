@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT submitter_id FROM submitter_versions WHERE slug = $1 LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "submitter_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "submitter_versions",
+            "name": "submitter_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2cae31e2b961e6cf84cc5d63afa4f5e5c7f976157f83836faeb2bdadc1d4dd5c"
+}

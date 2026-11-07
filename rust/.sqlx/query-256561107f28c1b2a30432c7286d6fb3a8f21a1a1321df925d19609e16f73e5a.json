@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE submissions SET completed_at =\n             (SELECT MAX(completed_at) FROM submitters WHERE submission_id = submissions.id)\n           WHERE id = $1 AND completed_at IS NULL\n             AND NOT EXISTS (SELECT 1 FROM submitters\n                             WHERE submission_id = $1 AND completed_at IS NULL\n                               AND NOT (uuid = ANY($2)))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "256561107f28c1b2a30432c7286d6fb3a8f21a1a1321df925d19609e16f73e5a"
+}

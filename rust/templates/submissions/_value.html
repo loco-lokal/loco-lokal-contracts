@@ -1,0 +1,87 @@
+{#- Port of app/views/submissions/_value.html.erb. `v` is the view model built by
+    `signing::pages::ShowView::value_partial`. -#}
+<field-value dir="auto" aria-hidden="true" class="{{ v.class }}" style="{{ v.style }}">
+  {% if v.kind == 'signature' %}
+    <div class="flex justify-between w-full h-full gap-1 {{ 'flex-row' if v.row else 'flex-col' }}">
+      <div class="flex overflow-hidden {{ 'w-1/2' if v.row else 'flex-grow' }}" style="min-height: 50%">
+        <img class="object-contain mx-auto" src="{{ v.src }}" alt="{{ v.alt }}">
+      </div>
+      {% if v.id %}
+        <div class="text-[1vw] lg:text-[0.55rem] lg:leading-[0.65rem] {{ 'w-1/2' if v.narrow else 'w-full' }}">
+          <div class="truncate uppercase">
+            ID: {{ v.id.uuid }}
+          </div>
+          {% if v.id.with_reason != false %}
+            <div>
+              {% if v.id.reason_value %}{{ t('reason') }}: {% endif %}{{ v.id.reason_value or t('digitally_signed_by') }} {{ v.id.name or '' }}
+              {% if v.id.email %}
+                &lt;{{ v.id.email }}&gt;
+              {% endif %}
+            </div>
+          {% endif %}
+          <div>
+            {{ v.id.time }} {{ v.id.zone }}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  {% elif v.kind == 'image' %}
+    <img class="object-contain mx-auto" src="{{ v.src }}" loading="lazy" alt="{{ v.alt }}">
+  {% elif v.kind == 'files' %}
+    <autosize-field></autosize-field>
+    <div class="px-0.5 flex flex-col justify-center">
+      {% for file in v.files %}
+        <a target="_blank" href="{{ file.url }}">
+          {{ svg_icon('paperclip', class='inline w-[1.6vw] h-[1.6vw] lg:w-4 lg:h-4') }}
+          {{ file.filename }}
+        </a>
+      {% endfor %}
+    </div>
+  {% elif v.kind == 'check' %}
+    <div class="w-full flex items-center justify-center">
+      <span class="sr-only">☑</span>
+      {{ svg_icon('check', class='aspect-square ' ~ v.check_class) }}
+    </div>
+  {% elif v.kind == 'option' %}
+    {% if v.checked %}
+      <div class="w-full flex items-center justify-center">
+        <span class="sr-only">☑</span>
+        {{ svg_icon('check', class='aspect-square ' ~ v.check_class) }}
+      </div>
+    {% endif %}
+  {% elif v.kind == 'cells' %}
+    <div class="w-full flex {{ v.valign_class }} {{ 'justify-end' if v.justify_end else '' }}">
+      {% for cell in v.cells %}
+        <div class="text-center flex-none" style="width: {{ v.cell_width }}%;">{{ cell }}</div>
+      {% endfor %}
+    </div>
+  {% elif v.kind == 'date' %}
+    <autosize-field></autosize-field>
+    <div class="flex w-full px-0.5 {{ v.valign_class }}">
+      <div class="w-full">{{ v.text }}</div>
+    </div>
+  {% elif v.kind == 'number' %}
+    <autosize-field></autosize-field>
+    <div class="flex w-full px-0.5 whitespace-nowrap {{ v.valign_class }}">
+      <div class="w-full">{{ v.text }}</div>
+    </div>
+  {% elif v.kind == 'strikethrough' %}
+    <div class="w-full h-full flex items-center justify-center">
+      {% if v.thin %}
+        <svg width="100%" height="100%">
+          <line x1="0" y1="50%" x2="100%" y2="50%" stroke="{{ v.color }}" style="stroke-width: clamp(0px, 0.5vw, 6px); stroke-width: 0.6cqmin"></line>
+        </svg>
+      {% else %}
+        <svg xmlns="http://www.w3.org/2000/svg" style="overflow: visible; width: calc(100% - 6px); height: calc(100% - 6px); width: calc(100% - 0.6cqmin); height: calc(100% - 0.6cqmin)">
+          <line x1="0" y1="0" x2="100%" y2="100%" stroke="{{ v.color }}" style="stroke-width: clamp(0px, 0.5vw, 6px); stroke-width: 0.6cqmin"></line>
+          <line x1="100%" y1="0" x2="0" y2="100%" stroke="{{ v.color }}" style="stroke-width: clamp(0px, 0.5vw, 6px); stroke-width: 0.6cqmin"></line>
+        </svg>
+      {% endif %}
+    </div>
+  {% else %}
+    <autosize-field></autosize-field>
+    <div class="flex w-full px-0.5 whitespace-pre-wrap {{ v.valign_class }}">
+      <div class="w-full">{{ v.text }}</div>
+    </div>
+  {% endif %}
+</field-value>

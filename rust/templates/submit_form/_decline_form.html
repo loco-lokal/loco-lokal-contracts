@@ -1,0 +1,13 @@
+{#- Port of app/views/submit_form/_decline_form.html.erb -#}
+{% import "shared/_button_title.html" as buttons %}
+<form action="/s/{{ slug }}/decline" accept-charset="UTF-8" method="post"><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+  <div class="form-control mt-4">
+    <label class="label justify-center" for="reason">{{ t('notify_the_sender_with_the_reason_you_declined') }}</label>
+    <textarea required="required" class="base-input w-full py-2 h-40" dir="auto" placeholder="{{ t('provide_a_reason') }}" style="height: 200px" rows="10" name="reason" id="reason">
+</textarea>
+  </div>
+  <toggle-submit dir="auto" class="form-control mt-4">
+    <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('decline'), disabled_with=t('submitting')) }}
+</button>
+  </toggle-submit>
+</form>

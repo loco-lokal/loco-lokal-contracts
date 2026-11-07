@@ -5,10 +5,10 @@
 //! - `protect_from_forgery with: :exception`: unsafe requests outside `/api` need a valid
 //!   authenticity token, from the `X-CSRF-Token` header (Turbo, Vue) or the
 //!   `authenticity_token` field of a URL-encoded form, and a matching `Origin` header when
-//!   one is sent. Multipart forms must send the header; Turbo does, and later phases add
-//!   field parsing where a page posts multipart without Turbo.
+//!   one is sent. Multipart forms (the signing form) may send the token as a field.
 //!
-//! URL-encoded bodies are buffered (up to [`MAX_FORM_BYTES`]) and handed on unchanged.
+//! URL-encoded bodies are buffered (up to [`MAX_FORM_BYTES`]) and multipart bodies (up to
+//! the API limit), then handed on unchanged.
 
 use axum::{
     body::{Body, to_bytes},
@@ -22,9 +22,15 @@ use crate::{errors::AppError, session::Session, state::AppState};
 
 pub const MAX_FORM_BYTES: usize = 10 * 1024 * 1024;
 
-/// Paths without CSRF protection: `ActionController::API` controllers.
+/// Paths without CSRF protection: `ActionController::API` controllers (`/api` and the
+/// signing form's `view`, `click_email` and `upload` endpoints).
 fn csrf_exempt(path: &str) -> bool {
-    path == "/api" || path.starts_with("/api/")
+    if path == "/api" || path.starts_with("/api/") {
+        return true;
+    }
+    path.strip_prefix("/s/")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(_, action)| matches!(action, "view" | "click_email" | "upload"))
 }
 
 fn is_urlencoded(headers: &HeaderMap) -> bool {
@@ -44,7 +50,29 @@ pub async fn forms_layer(State(state): State<AppState>, request: Request, next: 
     let (mut parts, body) = request.into_parts();
 
     let mut form_token = None;
-    let body = if parts.method == Method::POST && is_urlencoded(&parts.headers) {
+    let boundary = (parts.method == Method::POST)
+        .then(|| crate::api::params::multipart_boundary(&parts.headers))
+        .flatten();
+    let body = if let Some(boundary) = boundary {
+        let Ok(bytes) = to_bytes(body, crate::api::params::MAX_BODY_BYTES).await else {
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        };
+        if let Ok((fields, _)) = crate::api::params::parse_multipart(bytes.clone(), &boundary).await
+        {
+            if let Some(method) = fields
+                .get("_method")
+                .and_then(serde_json::Value::as_str)
+                .and_then(override_method)
+            {
+                parts.method = method;
+            }
+            form_token = fields
+                .get("authenticity_token")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+        }
+        Body::from(bytes)
+    } else if parts.method == Method::POST && is_urlencoded(&parts.headers) {
         let Ok(bytes) = to_bytes(body, MAX_FORM_BYTES).await else {
             return StatusCode::PAYLOAD_TOO_LARGE.into_response();
         };

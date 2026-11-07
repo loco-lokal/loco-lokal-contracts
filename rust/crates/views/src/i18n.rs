@@ -39,6 +39,8 @@ pub enum I18nError {
 enum Entry {
     Text(String),
     Plural(HashMap<String, String>),
+    /// Arrays such as `date.month_names` (`nil` items are empty strings).
+    List(Vec<String>),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -128,6 +130,7 @@ impl I18n {
 
         let template = match entry {
             Entry::Text(text) => text.as_str(),
+            Entry::List(_) => return None,
             Entry::Plural(forms) => {
                 let count = vars
                     .iter()
@@ -146,6 +149,199 @@ impl I18n {
         };
 
         Some(interpolate(template, vars))
+    }
+}
+
+impl I18n {
+    /// An array entry such as `date.month_names`, with fallbacks.
+    #[must_use]
+    pub fn list(&self, locale: &str, key: &str) -> Option<&[String]> {
+        fallback_chain(locale).into_iter().find_map(|l| {
+            match self.locales.get(l).and_then(|m| m.get(key)) {
+                Some(Entry::List(items)) => Some(items.as_slice()),
+                _ => None,
+            }
+        })
+    }
+
+    /// A plain text entry, without interpolation.
+    #[must_use]
+    pub fn text(&self, locale: &str, key: &str) -> Option<&str> {
+        fallback_chain(locale).into_iter().find_map(|l| {
+            match self.locales.get(l).and_then(|m| m.get(key)) {
+                Some(Entry::Text(text)) => Some(text.as_str()),
+                _ => None,
+            }
+        })
+    }
+
+    /// `I18n.l(date, format:)`: `date.formats.<format>` (or a literal `%` pattern).
+    #[must_use]
+    pub fn localize_date(&self, locale: &str, date: chrono::NaiveDate, format: &str) -> String {
+        let pattern = self.pattern(locale, "date", format);
+        self.strftime(
+            locale,
+            &pattern,
+            &date.and_time(chrono::NaiveTime::MIN),
+            None,
+        )
+    }
+
+    /// `I18n.l(time, format:)` for a time in a zone: `time.formats.<format>`. `zone_abbr`
+    /// is what `%Z` prints.
+    #[must_use]
+    pub fn localize_time(
+        &self,
+        locale: &str,
+        time: chrono::NaiveDateTime,
+        offset_seconds: i32,
+        zone_abbr: &str,
+        format: &str,
+    ) -> String {
+        let pattern = self.pattern(locale, "time", format);
+        self.strftime(locale, &pattern, &time, Some((offset_seconds, zone_abbr)))
+    }
+
+    fn pattern(&self, locale: &str, kind: &str, format: &str) -> String {
+        if format.contains('%') {
+            return format.to_owned();
+        }
+        self.text(locale, &format!("{kind}.formats.{format}"))
+            .unwrap_or(format)
+            .to_owned()
+    }
+
+    /// `I18n::Backend::Base#translate_localization_format` followed by Ruby's `strftime`.
+    fn strftime(
+        &self,
+        locale: &str,
+        pattern: &str,
+        time: &chrono::NaiveDateTime,
+        zone: Option<(i32, &str)>,
+    ) -> String {
+        use chrono::{Datelike as _, Timelike as _};
+        use std::fmt::Write as _;
+
+        let name = |key: &str, index: usize| -> String {
+            self.list(locale, key)
+                .and_then(|items| items.get(index))
+                .cloned()
+                .unwrap_or_default()
+        };
+        let weekday = time.weekday().num_days_from_sunday() as usize;
+        let month = time.month() as usize;
+        let hour12 = match time.hour() % 12 {
+            0 => 12,
+            h => h,
+        };
+        let meridian = |upper: bool| {
+            let key = if time.hour() < 12 {
+                "time.am"
+            } else {
+                "time.pm"
+            };
+            let text = self
+                .text(locale, key)
+                .unwrap_or(if time.hour() < 12 { "am" } else { "pm" })
+                .to_owned();
+            if upper {
+                text.to_uppercase()
+            } else {
+                text.to_lowercase()
+            }
+        };
+
+        let mut out = String::with_capacity(pattern.len() + 16);
+        let mut chars = pattern.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '%' {
+                out.push(c);
+                continue;
+            }
+            // Flags: `-` (no padding), `^` (upcase), `_` (space padding).
+            let mut no_pad = false;
+            let mut upcase = false;
+            let mut space_pad = false;
+            while let Some(&flag) = chars.peek() {
+                match flag {
+                    '-' => no_pad = true,
+                    '^' => upcase = true,
+                    '_' => space_pad = true,
+                    _ => break,
+                }
+                chars.next();
+            }
+            let Some(directive) = chars.next() else {
+                out.push('%');
+                break;
+            };
+            let num = |n: u32, width: usize| -> String {
+                if no_pad {
+                    n.to_string()
+                } else if space_pad {
+                    format!("{n:>width$}")
+                } else {
+                    format!("{n:0width$}")
+                }
+            };
+            let text = match directive {
+                'a' => name("date.abbr_day_names", weekday),
+                'A' => name("date.day_names", weekday),
+                'b' | 'h' => name("date.abbr_month_names", month),
+                'B' => name("date.month_names", month),
+                'p' => meridian(true),
+                'P' => meridian(false),
+                'd' => num(time.day(), 2),
+                'e' => {
+                    if no_pad {
+                        time.day().to_string()
+                    } else {
+                        format!("{:>2}", time.day())
+                    }
+                }
+                'm' => num(time.month(), 2),
+                'Y' => time.year().to_string(),
+                'y' => num(time.year().rem_euclid(100).unsigned_abs(), 2),
+                'H' => num(time.hour(), 2),
+                'k' => {
+                    if no_pad {
+                        time.hour().to_string()
+                    } else {
+                        format!("{:>2}", time.hour())
+                    }
+                }
+                'I' => num(hour12, 2),
+                'l' => {
+                    if no_pad {
+                        hour12.to_string()
+                    } else {
+                        format!("{hour12:>2}")
+                    }
+                }
+                'M' => num(time.minute(), 2),
+                'S' => num(time.second(), 2),
+                'j' => num(time.ordinal(), 3),
+                'Z' => zone.map_or_else(String::new, |(_, abbr)| abbr.to_owned()),
+                'z' => {
+                    let offset = zone.map_or(0, |(o, _)| o);
+                    let sign = if offset < 0 { '-' } else { '+' };
+                    let abs = offset.unsigned_abs();
+                    format!("{sign}{:02}{:02}", abs / 3600, abs % 3600 / 60)
+                }
+                '%' => "%".to_owned(),
+                other => {
+                    let mut s = String::from('%');
+                    s.push(other);
+                    s
+                }
+            };
+            if upcase {
+                let _ = write!(out, "{}", text.to_uppercase());
+            } else {
+                out.push_str(&text);
+            }
+        }
+        out
     }
 }
 
@@ -279,6 +475,13 @@ fn flatten(value: &Yaml, prefix: String, out: &mut HashMap<String, Entry>) {
                 };
                 flatten(v, key, out);
             }
+        }
+        Yaml::Array(items) => {
+            let items = items
+                .iter()
+                .map(|item| scalar(item).unwrap_or_default())
+                .collect();
+            out.insert(prefix, Entry::List(items));
         }
         other => {
             if let Some(text) = scalar(other) {

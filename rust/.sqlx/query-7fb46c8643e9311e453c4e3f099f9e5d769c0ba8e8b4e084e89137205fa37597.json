@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO completed_documents (submitter_id, sha256, created_at, updated_at)\n           SELECT $1, $2::varchar, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc')\n           WHERE NOT EXISTS (SELECT 1 FROM completed_documents\n                             WHERE submitter_id = $1 AND sha256 = $2::varchar)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7fb46c8643e9311e453c4e3f099f9e5d769c0ba8e8b4e084e89137205fa37597"
+}

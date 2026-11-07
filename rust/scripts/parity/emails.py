@@ -95,6 +95,34 @@ def run(base, token, body, expected):
     return result, found
 
 
+def signing_run(base, token, body, act, expected):
+    """Creates a submission (its invitations are dropped), acts on the signing form, and
+    returns the emails that follow."""
+    body = dict(body)
+    invitations = body.pop("expected_invitations", 0)
+    status, created = call(base, token, "POST", "/api/submissions", body)
+    assert status == 200, created
+    messages(invitations)
+    mailpit("DELETE", "/api/v1/messages")
+    act(base, created)
+    ids = sorted({s["submission_id"] for s in created})
+    result = messages(expected)
+    found = events(ids)
+    for sid in ids:
+        call(base, token, "DELETE", f"/api/submissions/{sid}?permanently=true")
+    return result, found
+
+
+def signing_case(token, label, body, act, expected=1):
+    rails = signing_run(RAILS, token, body, act, expected)
+    rust = signing_run(RUST, token, body, act, expected)
+    label = f"{label} ({len(rails[0])} of {expected} expected from Rails)"
+    if len(rails[0]) != expected:
+        rails = ([{"unexpected message count": len(rails[0])}], rails[1])
+    check(label, (0, rails[0]), (0, rust[0]))
+    check("  events", (0, rails[1]), (0, rust[1]))
+
+
 def case(token, label, body, expected=1):
     rails = run(RAILS, token, body, expected)
     rust = run(RUST, token, body, expected)
@@ -139,6 +167,37 @@ def main():
     case(token, "plain custom body", {
         "template_id": t, "message": {"subject": "S", "body": "Plain body"},
         "submitters": [first, second]})
+
+    from signing import Browser, signature_png
+
+    def decline(base, created):
+        browser = Browser(base)
+        slug = created[0]["slug"]
+        browser.request("GET", f"/s/{slug}")
+        browser.request("POST", f"/s/{slug}/decline",
+                        [("authenticity_token", browser.csrf), ("reason", "Not <b>today</b>\n\nSorry")])
+    signing_case(token, "declined email to the sender", {
+        "template_id": t, "send_email": False, "submitters": [first, second]}, decline)
+
+    _, template = call(RAILS, token, "GET", f"/api/templates/{t}")
+    uuids = {f["name"]: f["uuid"] for f in template["fields"] if f["submitter_uuid"] == template["submitters"][0]["uuid"]}
+
+    def complete(base, created):
+        browser = Browser(base)
+        slug = created[0]["slug"]
+        browser.request("GET", f"/s/{slug}")
+        upload = browser.request("POST", f"/s/{slug}/upload", [("type", "signature")],
+                                 {"file": ("signature.png", "image/png", signature_png())})
+        values = [(f"values[{uuids['Full Name']}]", "Ana")]
+        response = browser.request("POST", f"/s/{slug}", [
+            ("_method", "put"), ("authenticity_token", browser.csrf), *values,
+            (f"values[{uuids['Signature']}]", json.loads(upload[1])["uuid"]), ("completed", "true")], files={})
+        assert response[0] == 200, response
+    # The first party's copy of the documents (a completed email) comes with Phase 4b;
+    # this case covers the invitation of the next party in a preserved order.
+    signing_case(token, "next party invited after completion", {
+        "template_id": t, "order": "preserved", "expected_invitations": 1,
+        "submitters": [first, second]}, complete, expected=1)
 
     from writes import FAILURES
     sys.exit(1 if FAILURES else 0)

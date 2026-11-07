@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT event_type, data AS \"data: JsonText\" FROM submission_events\n           WHERE submitter_id = $1 AND event_type = ANY($2) ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_type",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "event_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "data: JsonText",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "data"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "35a2dfe16b3e044c48c55ef676084efb83f6c6746d8b5df686d9a7c1ebc510a3"
+}

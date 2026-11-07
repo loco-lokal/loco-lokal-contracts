@@ -62,6 +62,9 @@ pub struct SessionData {
     /// Pretender's `impersonated_user_id` (a user uuid).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub impersonated_user_uuid: Option<String>,
+    /// Rack's public session id (`request.session.id`), recorded with submission events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>,
 }
 
 struct Inner {
@@ -135,6 +138,25 @@ impl Session {
         inner.data.csrf = Some(URL_SAFE_NO_PAD.encode(secret));
         inner.dirty = true;
         secret
+    }
+
+    /// The public session id (`request.session.id`: `SecureRandom.hex(16)`), created on
+    /// first use.
+    #[must_use]
+    pub fn public_id(&self) -> String {
+        let mut inner = self.lock();
+        if let Some(sid) = inner.data.sid.clone() {
+            return sid;
+        }
+        let mut bytes = [0_u8; 16];
+        rand::fill(&mut bytes);
+        let sid = bytes.iter().fold(String::with_capacity(32), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        });
+        inner.data.sid = Some(sid.clone());
+        inner.dirty = true;
+        sid
     }
 
     /// A masked authenticity token for a page (`form_authenticity_token`).

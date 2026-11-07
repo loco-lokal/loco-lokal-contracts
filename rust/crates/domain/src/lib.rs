@@ -4,4 +4,5 @@
 
 pub mod ability;
 pub mod certificates;
+pub mod submit;
 pub mod timezones;

@@ -20,6 +20,8 @@ use minijinja::{Environment, Error, ErrorKind, State, Value, value::Kwargs};
 use serde::Serialize;
 
 pub use assets::Assets;
+/// ERB's `h`: escapes `& < > " '`.
+pub use assets::escape_attr as escape_html;
 pub use i18n::I18n;
 pub use icons::Icons;
 

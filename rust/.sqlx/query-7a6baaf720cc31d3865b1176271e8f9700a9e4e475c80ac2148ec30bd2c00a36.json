@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE submissions SET template_fields = $2,\n                                 updated_at = CASE WHEN template_fields IS NOT DISTINCT FROM $2::text\n                                                   THEN updated_at\n                                                   ELSE (now() AT TIME ZONE 'utc') END\n           WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7a6baaf720cc31d3865b1176271e8f9700a9e4e475c80ac2148ec30bd2c00a36"
+}

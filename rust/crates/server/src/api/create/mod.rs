@@ -9,7 +9,7 @@
 //! prefilled signature, image and file values, and templates with dynamic documents
 //! (Phase 5).
 
-mod email;
+pub(crate) mod email;
 mod submitter;
 mod validate;
 pub(crate) mod values;
@@ -1385,7 +1385,7 @@ async fn save(
 }
 
 /// `Submitters.send_signature_requests`.
-async fn send_signature_requests(state: &AppState, submitters: &[&Submitter]) {
+pub(crate) async fn send_signature_requests(state: &AppState, submitters: &[&Submitter]) {
     for submitter in submitters {
         if submitter
             .email

@@ -1,0 +1,54 @@
+{#- Port of app/views/submit_form/completed.html.erb. The resubmit button (start forms) is
+    not ported yet. -#}
+{% extends "layouts/form.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="max-w-md mx-auto px-2 mt-12 mb-4">
+  <div class="space-y-6 mx-auto">
+    <div class="space-y-6">
+      <div class="flex items-center justify-center">
+        {% include "start_form/_banner.html" %}
+      </div>
+      <div class="flex items-center bg-base-200 rounded-xl p-4 mb-4">
+        <div class="flex items-center">
+          <div class="mr-3">
+            {{ svg_icon('writing_sign', class='w-10 h-10') }}
+          </div>
+          <div>
+            <p dir="auto" class="text-lg font-bold mb-1">{{ name }}</p>
+            <p dir="auto" class="text-sm">
+              {{ signed_text }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      {% if can_email %}
+        <toggle-submit>
+          <form class="button_to" method="post" action="/send_submission_email"><button class="white-button w-full" type="submit">{{ buttons.button_title(title=t('send_copy_to_email'), disabled_with=t('sending'), icon=svg_icon('mail_forward', class='w-6 h-6')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="submitter_slug" value="{{ slug }}" /></form>
+        </toggle-submit>
+        {% if not single_party %}
+          <div class="divider uppercase">{{ t('or') }}</div>
+        {% else %}
+          <div class="py-2"></div>
+        {% endif %}
+      {% endif %}
+      {% if can_download %}
+        <download-button role="button" tabindex="0" aria-label="{{ t('download_documents') }}" data-src="/s/{{ slug }}/documents" class="base-button w-full">
+          <span class="flex items-center justify-center space-x-2" data-target="download-button.defaultButton">
+            {{ svg_icon('download', class='w-6 h-6') }}
+            <span>{{ t('download_documents') }}</span>
+          </span>
+          <span class="flex items-center justify-center space-x-2 hidden" data-target="download-button.loadingButton">
+            {{ svg_icon('loader', class='w-6 h-6 animate-spin') }}
+            <span>{{ t('downloading') }}</span>
+          </span>
+        </download-button>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% include "shared/_attribution.html" %}
+{% endblock %}

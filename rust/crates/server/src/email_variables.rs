@@ -122,7 +122,7 @@ fn email_host_origin(state: &AppState) -> String {
 
 /// `TextUtils.mask_value`: `MASK_REGEXP` characters become `X`, except for `unmask` ones
 /// at the start (positive) or end (negative).
-fn mask_value(text: &str, unmask: &Value) -> String {
+pub(crate) fn mask_value(text: &str, unmask: &Value) -> String {
     let mask = |s: &str| {
         s.chars()
             .map(|c| {
@@ -336,16 +336,16 @@ impl Vars {
         value.map(ruby_to_s)
     }
 
-    /// `I18n.l(expire_at.in_time_zone(account.timezone), format: :short)`. Month and day
-    /// names are English (`rails-i18n` names are not ported yet).
+    /// `I18n.l(expire_at.in_time_zone(account.timezone), format: :short)`.
     fn expire_at(&self, state: &AppState) -> Option<String> {
         let at = self.submission.expire_at?;
-        let tz = crate::api::time::account_zone(&self.account.timezone);
-        let local = at.and_utc().with_timezone(&tz);
-        let format = state
-            .views
-            .t(&self.account.locale, "time.formats.short", &[]);
-        Some(local.format(&format).to_string())
+        Some(crate::l10n::time(
+            state,
+            &self.account.locale,
+            at,
+            &self.account.timezone,
+            "short",
+        ))
     }
 
     /// `submission.submitters.order(:completed_at)` names, unique, comma-separated.

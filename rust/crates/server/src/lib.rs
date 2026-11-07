@@ -3,10 +3,13 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod disk;
 pub mod email_variables;
 pub mod errors;
 pub mod files;
 pub mod forms;
+pub mod images;
+pub mod l10n;
 pub mod locale;
 pub mod mail;
 pub mod markdown;
@@ -17,6 +20,7 @@ pub mod request;
 pub mod routes;
 pub mod search;
 pub mod session;
+pub mod signing;
 pub mod state;
 pub mod validation;
 pub mod webhooks;
@@ -47,6 +51,8 @@ pub fn job_registry() -> loco_jobs::Registry<JobContext> {
         .register::<purge::PurgeBlobs>()
         .register::<search::ReindexSearchEntry>()
         .register::<mail::SendInvitation>()
+        .register::<mail::SendDeclined>()
+        .register::<signing::completion::ProcessSubmitterCompletion>()
 }
 
 /// The application. Like Rails' `ActionDispatch::Static`, files in `public/` are served

@@ -69,4 +69,6 @@ pub fn router() -> Router<AppState> {
             "/blobs_proxy/{signed_uuid}/{*filename}",
             get(crate::files::show),
         )
+        .route("/disk/{encoded_key}/{*filename}", get(crate::disk::show))
+        .merge(crate::signing::router())
 }

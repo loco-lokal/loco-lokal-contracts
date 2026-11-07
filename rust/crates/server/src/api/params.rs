@@ -22,6 +22,71 @@ pub const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 #[derive(Clone, Debug, Default)]
 pub struct Params(pub Value);
 
+/// A file part of a multipart body (`ActionDispatch::Http::UploadedFile`).
+#[derive(Clone, Debug)]
+pub struct UploadedFile {
+    pub filename: String,
+    pub content_type: String,
+    pub data: axum::body::Bytes,
+}
+
+/// Parameters with the uploaded files of a multipart body, keyed by field name.
+#[derive(Clone, Debug, Default)]
+pub struct FormParams {
+    pub params: Params,
+    pub files: Vec<(String, UploadedFile)>,
+}
+
+impl FormParams {
+    #[must_use]
+    pub fn file(&self, name: &str) -> Option<&UploadedFile> {
+        self.files.iter().find(|(n, _)| n == name).map(|(_, f)| f)
+    }
+}
+
+/// The boundary of a `multipart/form-data` content type.
+#[must_use]
+pub fn multipart_boundary(headers: &axum::http::HeaderMap) -> Option<String> {
+    let content_type = headers.get(header::CONTENT_TYPE)?.to_str().ok()?;
+    multer::parse_boundary(content_type).ok()
+}
+
+/// Text fields (nested like a query string) and file parts of a multipart body.
+pub async fn parse_multipart(
+    bytes: axum::body::Bytes,
+    boundary: &str,
+) -> Result<(Value, Vec<(String, UploadedFile)>), multer::Error> {
+    let stream = futures_util::stream::once(async move { Ok::<_, std::io::Error>(bytes) });
+    let mut multipart = multer::Multipart::new(stream, boundary);
+    let mut root = Value::Object(Map::new());
+    let mut files = Vec::new();
+    while let Some(field) = multipart.next_field().await? {
+        let name = field.name().unwrap_or_default().to_owned();
+        if name.is_empty() {
+            continue;
+        }
+        if let Some(filename) = field.file_name().map(str::to_owned) {
+            let content_type = field.content_type().map_or_else(
+                || "application/octet-stream".to_owned(),
+                ToString::to_string,
+            );
+            let data = field.bytes().await?;
+            files.push((
+                name,
+                UploadedFile {
+                    filename,
+                    content_type,
+                    data,
+                },
+            ));
+        } else {
+            let text = field.text().await?;
+            normalize(&mut root, &name, Value::String(text));
+        }
+    }
+    Ok((root, files))
+}
+
 impl Params {
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
@@ -106,7 +171,17 @@ fn json_error(status: StatusCode, message: &str) -> Response {
 impl FromRequest<AppState> for Params {
     type Rejection = Response;
 
+    async fn from_request(request: Request, state: &AppState) -> Result<Self, Response> {
+        Ok(FormParams::from_request(request, state).await?.params)
+    }
+}
+
+impl FromRequest<AppState> for FormParams {
+    type Rejection = Response;
+
     async fn from_request(request: Request, _state: &AppState) -> Result<Self, Response> {
+        let boundary = multipart_boundary(request.headers());
+        let mut files = Vec::new();
         let mut params = request
             .uri()
             .query()
@@ -140,6 +215,17 @@ impl FromRequest<AppState> for Params {
             }
         } else if content_type == "application/x-www-form-urlencoded" {
             Some(parse_nested_query(&String::from_utf8_lossy(&bytes)))
+        } else if content_type == "multipart/form-data"
+            && let Some(boundary) = boundary
+        {
+            let (fields, parts) = parse_multipart(bytes, &boundary).await.map_err(|err| {
+                json_error(
+                    StatusCode::BAD_REQUEST,
+                    &format!("Invalid multipart body: {err}"),
+                )
+            })?;
+            files = parts;
+            Some(fields)
         } else {
             None
         };
@@ -150,7 +236,10 @@ impl FromRequest<AppState> for Params {
             }
         }
 
-        Ok(Self(params))
+        Ok(Self {
+            params: Params(params),
+            files,
+        })
     }
 }
 

@@ -1,0 +1,22 @@
+{#- Port of app/views/shared/_html_modal.html.erb. Callers set `modal_title`, `modal_id`
+    and the `modal_body` block. -#}
+<dialog id="{{ modal_id }}" class="modal items-start overflow-y-auto" inert="inert"{% if modal_title %} aria-labelledby="{{ modal_id }}-title"{% endif %}>
+  <div class="modal-box pt-4 pb-6 px-6 mt-20 max-h-none">
+    {% if modal_title %}
+      <div class="flex justify-between items-center border-b pb-2 mb-2 font-medium">
+        <span id="{{ modal_id }}-title">
+          {{ modal_title }}
+        </span>
+        <form method="dialog">
+          <button class="text-xl cursor-pointer w-6 h-6" aria-label="{{ t('close') }}">&times;</button>
+        </form>
+      </div>
+    {% endif %}
+    <div>
+      {% block modal_body %}{% endblock %}
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop">
+    <button aria-label="{{ t('close') }}"></button>
+  </form>
+</dialog>

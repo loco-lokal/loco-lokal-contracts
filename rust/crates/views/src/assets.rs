@@ -108,7 +108,8 @@ impl Assets {
 }
 
 /// `ERB::Util.html_escape`: escapes `& < > " '` and nothing else.
-pub(crate) fn escape_attr(value: &str) -> String {
+#[must_use]
+pub fn escape_attr(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
         match c {

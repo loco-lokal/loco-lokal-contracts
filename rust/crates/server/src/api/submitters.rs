@@ -201,28 +201,46 @@ pub async fn show(
 /// `SubmissionEvents.create_with_tracking_data`: the event with the request's IP, user
 /// agent and session user, blank values dropped (`compact_blank`). API requests have no
 /// session id.
+/// `SubmissionEvents.create_with_tracking_data`'s data: `{ip, ua, sid, uid, **data}`
+/// without blank values.
+#[must_use]
+pub fn tracking_data(
+    ip: Option<&str>,
+    ua: Option<&str>,
+    sid: Option<&str>,
+    user_id: Option<i64>,
+    extra: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut data = serde_json::Map::new();
+    for (key, value) in [("ip", ip), ("ua", ua), ("sid", sid)] {
+        if let Some(value) = value.filter(|v| !v.trim().is_empty()) {
+            data.insert(key.into(), value.into());
+        }
+    }
+    if let Some(user_id) = user_id {
+        data.insert("uid".into(), user_id.into());
+    }
+    for (key, value) in extra {
+        if loco_domain::submit::present(Some(&value)) {
+            data.insert(key, value);
+        }
+    }
+    data
+}
+
 pub async fn track_event(
     state: &AppState,
     submitter: &Submitter,
     event_type: &str,
     ip: Option<&str>,
     headers: &HeaderMap,
+    sid: Option<&str>,
     user_id: Option<i64>,
 ) -> Result<(), AppError> {
-    let mut data = serde_json::Map::new();
-    if let Some(ip) = ip.filter(|ip| !ip.is_empty()) {
-        data.insert("ip".into(), ip.into());
-    }
-    if let Some(ua) = headers
+    let ua = headers
         .get(axum::http::header::USER_AGENT)
-        .and_then(|v| v.to_str().ok())
-        .filter(|ua| !ua.trim().is_empty())
-    {
-        data.insert("ua".into(), ua.into());
-    }
-    if let Some(user_id) = user_id {
-        data.insert("uid".into(), user_id.into());
-    }
+        .and_then(|v| v.to_str().ok());
+    let data = tracking_data(ip, ua, sid, user_id, serde_json::Map::new());
     submissions::insert_event(
         &state.db,
         submitter,
@@ -263,6 +281,7 @@ pub async fn form_view(
         "view_form",
         ip.as_deref(),
         &headers,
+        None,
         None,
     )
     .await?;

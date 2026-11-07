@@ -1,0 +1,162 @@
+{#- Port of app/views/submit_form/show.html.erb (Turbo Native, delegation and partial
+    downloads render their buttons, but their endpoints are not ported yet). -#}
+{% extends "layouts/form.html" %}
+{% block content %}
+<div style="max-height: -webkit-fill-available;">
+  <div id="scrollbox">
+    <div id="sr_only_content"></div>
+    <div class="mx-auto block pb-72" style="max-width: 1000px">
+      {% include "submit_form/_banner.html" %}
+      <header id="signing_form_header" class="sticky min-[1230px]:static top-0 z-50 bg-base-100 py-2 px-2 flex items-center md:-mx-[8px]" style="margin-bottom: -16px">
+        <h1 class="text-xl md:text-2xl font-medium focus:text-clip" style="width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          {{ form_title }}
+        </h1>
+        <div class="flex items-center gap-2 group" style="margin-left: 20px; flex-shrink: 0">
+          {% if with_decline %}
+            <modal-button data-target="{{ decline_modal_id }}" class="hidden group-has-[.complete-button]:flex">
+              <button type="button" class="btn btn-sm md:!px-5 px-2" aria-label="{{ t('decline') }}">
+                <span class="hidden md:inline">{{ t('decline') }}</span>
+                <span class="inline md:hidden">
+                  {{ svg_icon('x', class='w-5 h-5') }}
+                </span>
+              </button>
+            </modal-button>
+          {% endif %}
+          <span id="complete_button_container" class="peer contents"></span>
+          {% if with_delegate %}
+            <modal-button data-target="{{ delegate_modal_id }}" class="hidden peer-empty:flex">
+              <button id="delegate_button" type="button" class="btn btn-sm !px-5">{{ t('delegate') }}</button>
+            </modal-button>
+            {% if with_decline %}
+              <modal-button data-target="{{ decline_modal_id }}" class="hidden peer-empty:flex">
+                <button id="decline_button" type="button" class="btn btn-sm px-2" aria-label="{{ t('decline') }}">
+                  {{ svg_icon('x', class='w-5 h-5') }}
+                </button>
+              </modal-button>
+            {% endif %}
+            {% if with_partial_download %}
+              <download-button role="button" tabindex="0" data-src="/s/{{ slug }}/download" class="btn btn-neutral text-white btn-sm px-2 hidden peer-empty:flex" title="{{ t('download') }}" aria-label="{{ t('download') }}">
+                <span data-target="download-button.defaultButton">
+                  {{ svg_icon('download', class='w-5 h-5') }}
+                </span>
+                <span class="hidden" data-target="download-button.loadingButton">
+                  {{ svg_icon('loader', class='w-5 h-5 animate-spin') }}
+                </span>
+              </download-button>
+            {% endif %}
+          {% else %}
+            {% if with_decline %}
+              <modal-button data-target="{{ decline_modal_id }}" class="hidden peer-empty:flex">
+                <button id="decline_button" type="button" class="btn btn-sm !px-5">{{ t('decline') }}</button>
+              </modal-button>
+            {% endif %}
+            {% if with_partial_download %}
+              <download-button role="button" tabindex="0" data-src="/s/{{ slug }}/download" class="btn btn-neutral text-white btn-sm !px-4 hidden peer-empty:flex" aria-label="{{ t('download') }}">
+                <span class="flex items-center justify-center" data-target="download-button.defaultButton">
+                  {{ svg_icon('download', class='w-6 h-6 inline md:hidden') }}
+                  <span class="hidden md:inline">{{ t('download') }}</span>
+                </span>
+                <span class="flex items-center justify-center space-x-2 hidden" data-target="download-button.loadingButton">
+                  {{ svg_icon('loader', class='w-6 h-6 animate-spin') }}
+                  <span class="hidden md:inline">{{ t('downloading') }}</span>
+                </span>
+              </download-button>
+            {% endif %}
+          {% endif %}
+        </div>
+      </header>
+      <scroll-buttons inert class="fixed right-5 top-2 hidden md:flex gap-1 z-50 ease-in-out opacity-0 -translate-y-10 group">
+        {% if with_decline %}
+          <modal-button data-target="{{ decline_modal_id }}" class="hidden group-has-[.complete-button]:flex">
+            <button type="button" class="btn btn-sm px-2" aria-label="{{ t('decline') }}">
+              {{ svg_icon('x', class='w-5 h-5') }}
+            </button>
+          </modal-button>
+        {% endif %}
+        <span id="complete_button_container_scroll" class="peer contents"></span>
+        {% if with_delegate %}
+          <modal-button data-target="{{ delegate_modal_id }}" class="hidden peer-empty:flex">
+            <button id="delegate_button_mobile" type="button" class="btn btn-sm px-0" aria-label="{{ t('delegate') }}">
+              <span class="min-[1366px]:inline hidden px-3">
+                {{ t('delegate') }}
+              </span>
+              <span class="inline min-[1366px]:hidden px-2">
+                {{ svg_icon('user_share', class='w-5 h-5') }}
+              </span>
+            </button>
+          </modal-button>
+          {% if with_decline %}
+            <modal-button data-target="{{ decline_modal_id }}" class="hidden peer-empty:flex">
+              <button id="decline_button_mobile" type="button" class="btn btn-sm px-2" aria-label="{{ t('decline') }}">
+                {{ svg_icon('x', class='w-5 h-5') }}
+              </button>
+            </modal-button>
+          {% endif %}
+        {% else %}
+          {% if with_decline %}
+            <modal-button data-target="{{ decline_modal_id }}" class="hidden peer-empty:flex">
+              <button id="decline_button_mobile" type="button" class="btn btn-sm px-0" aria-label="{{ t('decline') }}">
+                <span class="min-[1366px]:inline hidden px-3">
+                  {{ t('decline') }}
+                </span>
+                <span class="inline min-[1366px]:hidden px-2">
+                  {{ svg_icon('x', class='w-5 h-5') }}
+                </span>
+              </button>
+            </modal-button>
+          {% endif %}
+        {% endif %}
+        {% if with_partial_download %}
+          <download-button role="button" tabindex="0" data-src="/s/{{ slug }}/download" class="btn btn-neutral text-white btn-sm px-2 hidden peer-empty:flex" aria-label="{{ t('download') }}">
+            <span data-target="download-button.defaultButton">
+              {{ svg_icon('download', class='w-5 h-5') }}
+            </span>
+            <span class="hidden" data-target="download-button.loadingButton">
+              {{ svg_icon('loader', class='w-5 h-5 animate-spin') }}
+            </span>
+          </download-button>
+        {% endif %}
+      </scroll-buttons>
+      {% for document in documents %}
+        <div id="document-{{ document.uuid }}">
+          <div class="sr_only_content"></div>
+          {% for page in document.pages %}
+            <page-container class="block relative my-4 shadow-md" style="container-type: size; aspect-ratio: {{ page.width }} / {{ page.height }}">
+              <img loading="lazy" src="{{ page.url }}" width="{{ page.width }}" height="{{ page.height }}" alt="{{ page.alt }}">
+              <div id="page-{{ document.uuid }}-{{ page.index }}" class="top-0 bottom-0 left-0 right-0 absolute">
+                {% for annot in page.annots %}
+                  {% include "submissions/_annotation.html" %}
+                {% endfor %}
+                {% for v in page.values %}
+                  {% include "submissions/_value.html" %}
+                {% endfor %}
+              </div>
+            </page-container>
+          {% endfor %}
+        </div>
+      {% endfor %}
+      {% include "shared/_attribution.html" %}
+      {% if policy_links_html %}
+        <div class="text-center md:text-neutral-500 md:pr-3 md:pb-3 md:text-sm md:text-left mt-2 md:mt-0 md:fixed md:bottom-0 md:right-0">
+          <div class="md:max-w-[8rem] flex flex-wrap md:flex-col justify-center md:justify-start md:items-start space-x-2 md:space-x-0">
+            {{ policy_links_html | safe }}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+<div class="fixed bottom-0 w-full h-0 z-50">
+  <div class="mx-auto" style="max-width: 1000px">
+    <div class="relative md:mx-32">
+      {% include "submit_form/_submission_form.html" %}
+    </div>
+  </div>
+</div>
+{#- Rails' `tag.dialog` block leaves no newline before the script. -#}
+{% if with_decline %}
+  {% with modal_title = t('decline'), modal_id = decline_modal_id %}{% include "submit_form/_decline_modal.html" %}{% endwith %}{% include "scripts/_autosize_field.html" %}
+{% else %}
+  {% include "scripts/_autosize_field.html" %}
+{% endif %}
+{% endblock %}

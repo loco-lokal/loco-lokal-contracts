@@ -1,5 +1,5 @@
-//! Submitter emails: `SendSubmitterInvitationEmailJob` and
-//! `SubmitterMailer#invitation_email` / `#invitation_view_email`.
+//! Submitter emails: `SendSubmitterInvitationEmailJob`,
+//! `SubmitterMailer#invitation_email` / `#invitation_view_email` and `#declined_email`.
 
 use std::sync::LazyLock;
 
@@ -55,8 +55,187 @@ pub async fn invitation_later(state: &AppState, submitter_id: i64) {
     }
 }
 
+/// `SubmitterMailer.declined_email(submitter, user).deliver_later!`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SendDeclined {
+    pub submitter_id: i64,
+}
+
+impl Job for SendDeclined {
+    const KIND: &'static str = "send_submitter_declined_email";
+    const QUEUE: &'static str = "mailers";
+
+    type Context = AppState;
+
+    async fn run(self, state: AppState) -> anyhow::Result<()> {
+        send_declined(&state, self.submitter_id).await
+    }
+}
+
+/// Enqueues the declined email to the submission's sender when they receive those
+/// (`Users.send_emails?` and the `receive_declined_email` user config). Failures are logged.
+pub async fn declined_later(state: &AppState, submitter_id: i64) {
+    let job = SendDeclined { submitter_id };
+    if let Err(err) = loco_jobs::enqueue(&state.db, &job, EnqueueOptions::default()).await {
+        tracing::error!(%err, submitter_id, "enqueueing a declined email failed");
+    }
+}
+
+/// `simple_format(text, {}, sanitize: false)`.
+#[must_use]
+pub fn simple_format(text: &str) -> String {
+    static LINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n\n+").expect("valid regex"));
+    if text.trim().is_empty() {
+        return "<p></p>".to_owned();
+    }
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    LINE.split(&text)
+        .map(|paragraph| {
+            let chars: Vec<char> = paragraph.chars().collect();
+            let mut out = String::with_capacity(paragraph.len());
+            for (i, c) in chars.iter().enumerate() {
+                out.push(*c);
+                if *c == '\n'
+                    && i > 0
+                    && chars[i - 1] != '\n'
+                    && chars.get(i + 1).is_some_and(|n| *n != '\n')
+                {
+                    // `([^\n]\n)(?=[^\n])` → `\1<br />`
+                    out.push_str("<br />");
+                }
+            }
+            format!("<p>{out}</p>")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+async fn send_declined(state: &AppState, submitter_id: i64) -> anyhow::Result<()> {
+    let Some(submitter) = submissions::find_submitter(&state.db, submitter_id).await? else {
+        anyhow::bail!("submitter {submitter_id} not found");
+    };
+    let Some(vars) = Vars::load(state, submitter)
+        .await
+        .map_err(crate::errors::AppError::into_anyhow)?
+    else {
+        anyhow::bail!("submission of submitter {submitter_id} not found");
+    };
+    let Some(user) = sender_user(state, &vars).await? else {
+        return Ok(());
+    };
+    if user.archived_at.is_some()
+        || loco_db::signing::user_config(&state.db, user.id, "receive_declined_email").await?
+            == Some(Value::Bool(false))
+    {
+        return Ok(());
+    }
+
+    let locale = vars.account.locale.clone();
+    let name = vars
+        .submission
+        .name
+        .clone()
+        .or_else(|| vars.template.as_ref().map(|t| t.name.clone()))
+        .unwrap_or_default();
+    let who = vars
+        .submitter
+        .name
+        .clone()
+        .or_else(|| vars.submitter.email.clone())
+        .or_else(|| vars.submitter.phone.clone())
+        .unwrap_or_default();
+    let subject = state.views.t(
+        &locale,
+        "name_declined_by_submitter",
+        &[
+            ("name", crate::webhooks::truncate(&name, 20)),
+            ("submitter", who.clone()),
+        ],
+    );
+    let reason = loco_db::signing::events_of_types(&state.db, vars.submitter.id, &["decline_form"])
+        .await?
+        .into_iter()
+        .next()
+        .and_then(|(_, data)| {
+            data.get("reason")
+                .map(crate::api::create::values::ruby_to_s)
+        })
+        .unwrap_or_default();
+    let html = apply_direction(state.views.render(
+        "submitter_mailer/declined_email.html",
+        json!({
+            "locale": locale,
+            "product_name": PRODUCT_NAME,
+            "name": name,
+            "submitter": who,
+            "reason_html": simple_format(&loco_views::escape_html(&reason)),
+            "submission_url": format!("{}/submissions/{}", email_origin(state), vars.submission.id),
+        }),
+    )?);
+
+    let to = if user.role == "integration" {
+        static PLUS: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"\+\w+@").expect("valid regex"));
+        PLUS.replace(&user.friendly_name(), "@").into_owned()
+    } else {
+        user.friendly_name()
+    };
+    let from = from_address(state, &vars).await?;
+    let message_uuid = uuid::Uuid::new_v4().to_string();
+    let email = Email {
+        from,
+        to: vec![to],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: vars.submitter.friendly_name(),
+        subject,
+        html,
+        text: None,
+        attachments: Vec::new(),
+        headers: vec![("X-Message-Uuid".to_owned(), message_uuid.clone())],
+    };
+    let delivered = state.mailer.deliver(&email).await?;
+    record_delivery(
+        state,
+        vars.submission.account_id,
+        "submitter_declined",
+        &message_uuid,
+        vars.submitter.id,
+        &delivered,
+    )
+    .await;
+    Ok(())
+}
+
+/// `ActionMailerEventsObserver#delivered_email`: one `send` event per recipient.
+pub(crate) async fn record_delivery(
+    state: &AppState,
+    account_id: i64,
+    tag: &str,
+    message_uuid: &str,
+    submitter_id: i64,
+    delivered: &loco_mailer::Delivered,
+) {
+    let data = JsonText(json!({ "from": delivered.from, "method": delivered.method }));
+    for address in &delivered.to {
+        let event = NewEmailEvent {
+            account_id,
+            tag,
+            message_id: message_uuid,
+            emailable_type: "Submitter",
+            emailable_id: submitter_id,
+            event_type: "send",
+            email: address,
+            data: &data,
+        };
+        if let Err(err) = submissions::insert_email_event(&state.db, &event).await {
+            tracing::error!(%err, "recording an email event failed");
+        }
+    }
+}
+
 /// `Accounts.can_send_emails?` outside multitenant mode.
-async fn can_send_emails(state: &AppState) -> anyhow::Result<bool> {
+pub(crate) async fn can_send_emails(state: &AppState) -> anyhow::Result<bool> {
     if !state.config.production || std::env::var("SMTP_ADDRESS").is_ok_and(|v| !v.is_empty()) {
         return Ok(true);
     }

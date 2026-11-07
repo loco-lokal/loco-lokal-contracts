@@ -1,0 +1,16 @@
+{#- Port of app/views/layouts/form.html.erb -#}
+<!DOCTYPE html>
+<html data-theme="docuseal" lang="{{ locale }}">
+  <head>
+    {% include "layouts/_head_tags.html" %}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{ csrf_meta_tags() }}
+    {{ javascript_pack_tag('form', defer=true) }}
+    {{ stylesheet_pack_tag('form', media='all', turbo_track='dynamic') }}
+  </head>
+  <body class="agency-ui agency-form">
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

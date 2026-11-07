@@ -40,6 +40,13 @@ pub enum StorageError {
     Integrity(String),
 }
 
+impl StorageError {
+    #[must_use]
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::Store(object_store::Error::NotFound { .. }))
+    }
+}
+
 #[derive(Clone)]
 pub struct Storage {
     default_service: String,
@@ -204,6 +211,25 @@ impl Storage {
         }
 
         Ok(data)
+    }
+
+    /// The file at `key` of a service, without a checksum check (the disk controller).
+    pub async fn download_key(&self, service_name: &str, key: &str) -> Result<Bytes, StorageError> {
+        let service = self.service(service_name)?;
+        Ok(service
+            .store
+            .get(&object_path(service, key))
+            .await?
+            .bytes()
+            .await?)
+    }
+
+    /// Whether a service stores files on local disk (`ActiveStorage::Service::DiskService`).
+    #[must_use]
+    pub fn is_disk(&self, service_name: &str) -> bool {
+        self.services
+            .get(service_name)
+            .is_some_and(|s| s.sharded_disk_layout)
     }
 
     /// Deletes the stored file (the database row is left to the caller, as `Blob#delete`).

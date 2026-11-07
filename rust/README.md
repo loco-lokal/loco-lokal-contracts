@@ -102,7 +102,7 @@ cargo deny check
 
 Set `SQLX_OFFLINE=true` to build without a database.
 
-## API parity checks
+## Parity checks
 
 `scripts/parity/` runs the same requests against Rails (`RAILS_URL`, default `http://127.0.0.1:3000`) and the Rust server (`RUST_URL`, default `http://127.0.0.1:8080`), then compares the results. Ids, slugs, uuids, times and signed file tokens are normalized. Both servers share the dev database. The `rails` service bind-mounts `rust/tmp/rails-workdir`, so run the Rust server with `WORKDIR=rust/tmp/rails-workdir` to serve the same stored files.
 
@@ -112,21 +112,39 @@ cd rust/scripts/parity
 ./compare.py "$PARITY_TOKEN" GET /api/templates GET /api/submissions   # reads: method/path pairs, optional JSON body
 ./writes.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # template clone/update/archive, submission update/archive
 ./create.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # submission create modes and errors, submitter updates; compares stored rows
-./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation emails via Mailpit, email_events rows
-./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows
+./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows
+./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined and next-party emails via Mailpit, email_events rows
+./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ```
 
-`emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
+`signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
 
 ## Status
 
-Phase 3 ports the JSON API under `/api`: templates, submissions, submitters, form views, the user endpoint, full-text search, invitation emails and webhooks. These parts return 422 or are still missing; they come in later phases:
+Phase 3 ported the JSON API under `/api`: templates, submissions, submitters, form views, the user endpoint, full-text search, invitation emails and webhooks.
 
-- Creating `completed` submitters, completing them through `PUT /api/submitters/:id`, and prefilling attachment fields (Phase 4, along with result documents).
-- Dynamic documents (Phase 5).
+Phase 4a ports the recipient signing form at `/s/:slug`:
+
+- The page itself.
+- The awaiting, archived, expired, declined and completed pages, and `/success`.
+- The view, click_email, values and upload endpoints.
+- Saving and completing values (`Submitters::SubmitValues` with conditions, defaults, validation and invite-by-field).
+- Declining, with the declined email.
+- The completion job: completed submitters, next-party invitations, and the `form.*` and `submission.completed` webhooks.
+- Active Storage disk URLs (`/disk/:encoded_key/*filename`).
+
+These parts return 422 ("not supported yet") or are still missing:
+
+- Result documents, PDF signing and the completed emails that attach them (Phase 4b). The completion job records no `completed_documents`, and the `form.completed` and `submission.completed` webhooks send `documents: []` until then.
+- The audit trail (Phase 4c), sent as `audit_log_url: null`.
+- The start form `/d/:slug` and resubmitting (Phase 4).
+- Email two-factor verification on the signing form (422), and the 2FA cookie checks.
+- Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
+- `/s/:slug/download`, `/s/:slug/documents`, delegation, `/send_submission_email` and `/p/:slug`. Their buttons render, but the endpoints are not ported yet.
+- The remember-signature cookie, and presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
+- Creating `completed` submitters and completing them through `PUT /api/submitters/:id`, and prefilling attachment fields.
 - Expiration jobs (Phase 7).
 - Extracting email assets from message bodies of 2 KB or more.
-- Localized month and day names in `{{submission.expire_at}}`, which are English for now.
 
 ## Layout
 
