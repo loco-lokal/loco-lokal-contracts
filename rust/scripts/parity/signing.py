@@ -162,7 +162,8 @@ def stored(submission_id):
            result_documents: e.documents.map {{ |d| [d.filename.to_s, d.content_type, d.metadata.keys.sort] }},
            completed_documents: CompletedDocument.where(submitter_id: e.id).count }}
       end
-      puts({{ completed: s.completed_at.present?, submitters: out }}.to_json)
+      audit = s.audit_trail.attached? && [s.audit_trail.filename.to_s, s.audit_trail.content_type, s.audit_trail.metadata]
+      puts({{ completed: s.completed_at.present?, audit_trail: audit, submitters: out }}.to_json)
     """
     result = subprocess.run(
         ["docker", "compose", "-f", "compose.rust-dev.yml", "exec", "-T", "-w", "/app", "rails",
@@ -184,6 +185,21 @@ def result_pdfs(submission_id):
         cwd=ROOT, capture_output=True, text=True, check=True,
     )
     return [[base64.b64decode(d) for d in docs] for docs in json.loads(result.stdout.strip().splitlines()[-1])]
+
+
+def audit_pdf(submission_id):
+    """The submission's audit trail PDF, read through Rails (None without one)."""
+    script = f"""
+      s = Submission.find({submission_id})
+      puts('AUDIT:' + (s.audit_trail.attached? ? Base64.strict_encode64(s.audit_trail.download) : ''))
+    """
+    result = subprocess.run(
+        ["docker", "compose", "-f", "compose.rust-dev.yml", "exec", "-T", "-w", "/app", "rails",
+         "bin/rails", "runner", script],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    data = next(line[6:] for line in result.stdout.splitlines() if line.startswith("AUDIT:"))
+    return base64.b64decode(data) if data else None
 
 
 def render(pdf):
@@ -221,9 +237,10 @@ def signatures(pdf):
 
 def compare_pdfs(rails_id, rust_id, signed=False):
     """Renders both backends' result PDFs and checks their signatures. With `signed`, each
-    document must carry at least one signature."""
+    document of the last party (whose results are signed) must carry a signature."""
     global FAILURES
-    for index, (a_docs, b_docs) in enumerate(zip(result_pdfs(rails_id), result_pdfs(rust_id))):
+    pairs = list(zip(result_pdfs(rails_id), result_pdfs(rust_id)))
+    for index, (a_docs, b_docs) in enumerate(pairs):
         for doc, (a, b) in enumerate(zip(a_docs, b_docs)):
             label = f"result pdf {'signed ' if signed else ''}{index}.{doc}"
             pages_a, pages_b = render(a), render(b)
@@ -242,10 +259,76 @@ def compare_pdfs(rails_id, rust_id, signed=False):
                 changed = sum(1 for v in diff.getdata() if v > 64)
                 worst = max(worst, changed / (x.size[0] * x.size[1]))
             sig_a, sig_b = signatures(a), signatures(b)
-            ok = worst < 0.002 and sig_a == sig_b and sig_b[0] == sig_b[1] and (sig_b[0] > 0 or not signed)
+            ok = worst < 0.002 and sig_a == sig_b and sig_b[0] == sig_b[1] and (sig_b[0] > 0 or not signed or index < len(pairs) - 1)
             if not ok:
                 FAILURES += 1
             print(f"{'ok  ' if ok else 'FAIL'} {label} [pixels differing {worst:.4%}, signatures rails {sig_a} rust {sig_b}]")
+
+
+def words(pdf):
+    """Each word with its box, from `pdftotext -bbox`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "doc.pdf"
+        path.write_bytes(pdf)
+        out = subprocess.run(["pdftotext", "-bbox", str(path), "-"], capture_output=True, check=True).stdout
+    pattern = r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)</word>'
+    return [(m[4], tuple(float(v) for v in m[:4])) for m in re.findall(pattern, out.decode())]
+
+
+# Text that differs between two runs: ids, checksums, addresses and times.
+VARIABLE = re.compile(r"\d|^[A-Za-z0-9_=-]{20,}$")
+
+
+def pdf_info(pdf):
+    """The info dictionary's and the XMP packet's entries, with dates and packet ids masked."""
+    entries = sorted(set(re.findall(rb"/(Creator|Producer|ModDate|CreationDate|Title|M)\s*\(([^)]*)\)", pdf)))
+    xmp = re.search(rb"<x:xmpmeta.*?</x:xmpmeta>", pdf, re.S)
+    masked = re.sub(rb"\d{4}-\d\d-\d\dT[\d:]+[+-]\d\d:\d\d", b"<time>", xmp.group(0)) if xmp else b""
+    intents = re.findall(rb"/S\s*/GTS_PDFA1|/OutputConditionIdentifier\s*\([^)]*\)|/RegistryName\s*\([^)]*\)", pdf)
+    return ([(k.decode(), re.sub(r"\d{14}", "<date>", v.decode("latin1"))) for k, v in entries],
+            masked.decode(), sorted(set(intents)))
+
+
+def compare_audit(rails_id, rust_id, label):
+    """The audit trails of two submissions: word positions (per-run tokens such as ids may
+    differ in text, not in position), the page renders, the metadata and the signature."""
+    global FAILURES
+    a, b = audit_pdf(rails_id), audit_pdf(rust_id)
+    if a is None and b is None:
+        print(f"ok   {label} [none]")
+        return
+    if a is None or b is None:
+        FAILURES += 1
+        print(f"FAIL {label}: audit trail rails {a is not None} rust {b is not None}")
+        return
+    problems = []
+    wa, wb = words(a), words(b)
+    if len(wa) != len(wb):
+        problems.append(f"{len(wa)} words vs {len(wb)}")
+    for (ta, ba), (tb, bb) in zip(wa, wb):
+        same = ta == tb or (VARIABLE.search(ta) and VARIABLE.search(tb))
+        box = (0, 1, 2, 3) if ta == tb else (0, 1, 3)
+        if not same or any(abs(ba[i] - bb[i]) > 0.01 for i in box):
+            problems.append(f"{ta!r} {ba} vs {tb!r} {bb}")
+            break
+    pages_a, pages_b = render(a), render(b)
+    worst = 0.0 if len(pages_a) == len(pages_b) else 1.0
+    from PIL import ImageChops
+
+    for x, y in zip(pages_a, pages_b):
+        changed = sum(1 for v in ImageChops.difference(x, y).getdata() if v > 64) if x.size == y.size else 1e9
+        worst = max(worst, changed / (x.size[0] * x.size[1]))
+    if worst > 0.01:
+        problems.append(f"pixels differing {worst:.4%}")
+    if pdf_info(a) != pdf_info(b):
+        problems.append(f"metadata {pdf_info(a)} vs {pdf_info(b)}")
+    sig_a, sig_b = signatures(a), signatures(b)
+    if sig_a != sig_b or sig_b[0] != sig_b[1]:
+        problems.append(f"signatures rails {sig_a} rust {sig_b}")
+    if problems:
+        FAILURES += 1
+    print(f"{'FAIL' if problems else 'ok  '} {label} [{len(pages_b)} pages, pixels differing {worst:.4%}, "
+          f"signatures {sig_b}]" + "".join(f"\n     {p}" for p in problems))
 
 
 def run(base, token, template_id, fields):
@@ -306,29 +389,42 @@ def run(base, token, template_id, fields):
 
 
 def run_signed(base, token, template_id, fields):
-    """A single-party submission completed in one go: its result documents are signed."""
+    """A submission both parties complete, so its result documents and audit trail are
+    signed. Repeated form views make the event log long enough to continue on a second
+    page of the audit trail."""
     status, created = call(
         RAILS, token, "POST", "/api/submissions",
         {"template_id": template_id, "send_email": False,
-         "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"}]},
+         "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"},
+                        {"role": "Second Party", "email": "bob@example.test", "phone": "+4915112345678"}]},
     )
     assert status == 200, created
-    signer = Browser(base)
-    s = created[0]["slug"]
-    signer.request("GET", f"/s/{s}")
-    upload = signer.request(
-        "POST", f"/s/{s}/upload", [("type", "signature")],
-        {"file": ("signature.png", "image/png", signature_png())},
-    )
-    status = signer.request(
-        "POST", f"/s/{s}",
-        [("_method", "put"), ("authenticity_token", signer.csrf),
-         (f"values[{fields['Full Name']}]", "Ana Example"),
-         (f"values[{fields['Signature']}]", json.loads(upload[1])["uuid"]),
-         ("completed", "true"), ("timezone", "Europe/Berlin")],
-        files={},
-    )
-    assert status[0] == 200, f"{base}: completing the single-party submission returned {status[0]}"
+    values = {
+        "First Party": [(fields["Full Name"], "Ana Example"), (fields["Start Date"], "2026-03-14"),
+                        (fields["Plan"], "Pro")],
+        "Second Party": [(fields["Approver"], "Bob Approver")],
+    }
+    signature = {"First Party": "Signature", "Second Party": "Countersignature"}
+    for submitter in created:
+        signer = Browser(base)
+        s = submitter["slug"]
+        page = signer.request("GET", f"/s/{s}")[1]
+        view_token = re.search(r'data-view-token="([^"]+)"', page).group(1)
+        for _ in range(20 if submitter["role"] == "First Party" else 1):
+            signer.request("POST", f"/s/{s}/view", [("v", view_token)])
+        upload = signer.request(
+            "POST", f"/s/{s}/upload", [("type", "signature")],
+            {"file": ("signature.png", "image/png", signature_png())},
+        )
+        status = signer.request(
+            "POST", f"/s/{s}",
+            [("_method", "put"), ("authenticity_token", signer.csrf),
+             *((f"values[{uuid}]", value) for uuid, value in values[submitter["role"]]),
+             (f"values[{fields[signature[submitter['role']]]}]", json.loads(upload[1])["uuid"]),
+             ("completed", "true"), ("timezone", "Europe/Berlin")],
+            files={},
+        )
+        assert status[0] == 200, f"{base}: completing {submitter['role']} returned {status[0]}"
     return created[0]["submission_id"]
 
 
@@ -370,6 +466,11 @@ def main():
         print("FAIL stored rows (signed)")
         print(diff(a, b))
     compare_pdfs(*signed_ids, signed=True)
+    compare_audit(rails_id, rust_id, "audit trail")
+    compare_audit(*signed_ids, "audit trail (signed)")
+    if os.environ.get("KEEP"):
+        print("kept", rails_id, rust_id, *signed_ids)
+        sys.exit(1 if FAILURES else 0)
     for submission_id in (rails_id, rust_id, *signed_ids):
         call(RAILS, token, "DELETE", f"/api/submissions/{submission_id}")
     sys.exit(1 if FAILURES else 0)

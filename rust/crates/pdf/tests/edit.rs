@@ -43,6 +43,8 @@ fn draw(editor: &mut Editor, family: &str, text: &str) {
         line_height: None,
         fill_color: Some([0.0, 0.0, 1.0]),
         white_underlay: false,
+        underline: false,
+        link: None,
     });
     let layouter = Layouter::new(Align::Left, Valign::Top);
     let fitted = layouter.fit(

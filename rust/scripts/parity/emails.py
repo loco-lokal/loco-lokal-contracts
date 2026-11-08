@@ -63,6 +63,8 @@ def messages(expected):
             "html": normalize(message["HTML"]),
             "text": normalize(message["Text"], collapse=False),
             "has_message_uuid": "X-Message-Uuid" in headers,
+            # The PDFs' bytes differ (ids, dates, signatures); signing.py compares them.
+            "attachments": [(a["FileName"], a["ContentType"]) for a in message["Attachments"]],
         })
     return sorted(result, key=lambda m: json.dumps(m["to"]))
 
@@ -193,11 +195,41 @@ def main():
             ("_method", "put"), ("authenticity_token", browser.csrf), *values,
             (f"values[{uuids['Signature']}]", json.loads(upload[1])["uuid"]), ("completed", "true")], files={})
         assert response[0] == 200, response
-    # The completed emails attach the audit trail, so they come with Phase 4c;
-    # this case covers the invitation of the next party in a preserved order.
+    # The next party in a preserved order is invited.
     signing_case(token, "next party invited after completion", {
         "template_id": t, "order": "preserved", "expected_invitations": 1,
         "submitters": [first, second]}, complete, expected=1)
+
+    fields = {f["name"]: f["uuid"] for f in template["fields"]}
+    roles = {"First Party": [("Full Name", "Ana")], "Second Party": [("Approver", "Bob")]}
+    signatures = {"First Party": "Signature", "Second Party": "Countersignature"}
+
+    def complete_all(base, created):
+        for submitter in created:
+            browser = Browser(base)
+            slug = submitter["slug"]
+            browser.request("GET", f"/s/{slug}")
+            upload = browser.request("POST", f"/s/{slug}/upload", [("type", "signature")],
+                                     {"file": ("signature.png", "image/png", signature_png())})
+            values = [(f"values[{fields[name]}]", value) for name, value in roles[submitter["role"]]]
+            response = browser.request("POST", f"/s/{slug}", [
+                ("_method", "put"), ("authenticity_token", browser.csrf), *values,
+                (f"values[{fields[signatures[submitter['role']]]}]", json.loads(upload[1])["uuid"]),
+                ("completed", "true")], files={})
+            assert response[0] == 200, response
+
+    # The sender's completed email and the party's copy, each with the result document
+    # and the audit trail.
+    signing_case(token, "completed emails", {
+        "template_id": t, "expected_invitations": 1, "submitters": [first]},
+        complete_all, expected=2)
+    # Both parties complete: BCC addresses get the completed email too, and the copy
+    # goes to both parties in one message.
+    signing_case(token, "completed emails with bcc", {
+        "template_id": t, "order": "random", "expected_invitations": 2,
+        "bcc_completed": "audit@example.com, Boss <boss@example.com>",
+        "submitters": [first, {**second, "name": "Bob Stone"}]},
+        complete_all, expected=4)
 
     from writes import FAILURES
     sys.exit(1 if FAILURES else 0)

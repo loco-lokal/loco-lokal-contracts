@@ -244,7 +244,7 @@ pub(crate) async fn can_send_emails(state: &AppState) -> anyhow::Result<bool> {
         .is_some())
 }
 
-fn present(value: Option<&Value>) -> Option<String> {
+pub(crate) fn present(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
@@ -292,7 +292,7 @@ fn rtl(text: &str) -> bool {
 }
 
 /// The `dir` of the mailer layout's body follows the content, without the attribution.
-fn apply_direction(html: String) -> String {
+pub(crate) fn apply_direction(html: String) -> String {
     const BODY: &str = "<body dir=\"auto\">";
     let Some(start) = html.find(BODY) else {
         return html;
@@ -545,7 +545,28 @@ async fn build_reply_to(
     vars: &Vars,
     email_config: Option<&Value>,
 ) -> anyhow::Result<Option<String>> {
+    build_reply_to_for(state, vars, email_config, false).await
+}
+
+/// `build_submitter_reply_to(…, documents_copy_email:)`.
+pub(crate) async fn build_reply_to_for(
+    state: &AppState,
+    vars: &Vars,
+    email_config: Option<&Value>,
+    documents_copy_email: bool,
+) -> anyhow::Result<Option<String>> {
     let mut reply_to = present(vars.submitter.preferences.get("reply_to"))
+        .or_else(|| {
+            documents_copy_email
+                .then(|| {
+                    present(
+                        vars.template
+                            .as_ref()
+                            .and_then(|t| t.preferences.get("documents_copy_email_reply_to")),
+                    )
+                })
+                .flatten()
+        })
         .or_else(|| email_config.and_then(|c| present(c.get("reply_to"))));
     if reply_to.is_none() {
         let sender = sender_user(state, vars).await?;
@@ -558,7 +579,10 @@ async fn build_reply_to(
 }
 
 /// `submission.created_by_user || template.author`.
-async fn sender_user(state: &AppState, vars: &Vars) -> anyhow::Result<Option<users::User>> {
+pub(crate) async fn sender_user(
+    state: &AppState,
+    vars: &Vars,
+) -> anyhow::Result<Option<users::User>> {
     if let Some(user) = &vars.created_by {
         return Ok(Some(user.clone()));
     }
@@ -570,7 +594,7 @@ async fn sender_user(state: &AppState, vars: &Vars) -> anyhow::Result<Option<use
 
 /// `from_address_for_submitter`: the integration sender for API and embedded requests,
 /// else the creator.
-async fn from_address(state: &AppState, vars: &Vars) -> anyhow::Result<Option<String>> {
+pub(crate) async fn from_address(state: &AppState, vars: &Vars) -> anyhow::Result<Option<String>> {
     if matches!(vars.submission.source.as_str(), "api" | "embed")
         && let Some(from) = present(
             users::account_config(

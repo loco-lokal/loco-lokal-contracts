@@ -27,14 +27,14 @@ use super::Form;
 use crate::{errors::AppError, state::AppState};
 
 const FONT_SIZE: f64 = 11.0;
-const FONT_NAME: &str = "GoNotoKurrent-Regular.ttf";
-const FONT_BOLD_NAME: &str = "GoNotoKurrent-Bold.ttf";
-const SIGN_REASON: &str = "Signed with DocuSeal.com";
-const UNSUPPORTED_IMAGE_TYPES: &[&str] = &["image/heic", "image/avif"];
+pub(super) const FONT_NAME: &str = "GoNotoKurrent-Regular.ttf";
+pub(super) const FONT_BOLD_NAME: &str = "GoNotoKurrent-Bold.ttf";
+pub(super) const SIGN_REASON: &str = "Signed with DocuSeal.com";
+pub(super) const UNSUPPORTED_IMAGE_TYPES: &[&str] = &["image/heic", "image/avif"];
 const TEXT_LEFT_MARGIN: f64 = 1.0;
 const TEXT_TOP_MARGIN: f64 = 1.0;
 const A4_WIDTH: f64 = 595.0;
-const TESTING_FOOTER: &str = "Testing Document - NOT LEGALLY BINDING";
+pub(super) const TESTING_FOOTER: &str = "Testing Document - NOT LEGALLY BINDING";
 const DEFAULT_FONTS: &[&str] = &["Times", "Helvetica", "Courier"];
 const CHECK_PNG: &[u8] = include_bytes!("../../../../../lib/pdf_icons/check.png");
 const PAPERCLIP_PNG: &[u8] = include_bytes!("../../../../../lib/pdf_icons/paperclip.png");
@@ -42,25 +42,25 @@ const PAPERCLIP_PNG: &[u8] = include_bytes!("../../../../../lib/pdf_icons/paperc
 const ICON_SIZE: f64 = 240.0;
 
 const FLATTEN_RESULT_PDF_KEY: &str = "flatten_result_pdf";
-const WITH_SIGNATURE_ID: &str = "with_signature_id";
-const WITH_FILE_LINKS_KEY: &str = "with_file_links";
-const WITH_TIMESTAMP_SECONDS_KEY: &str = "with_timestamp_seconds";
+pub(super) const WITH_SIGNATURE_ID: &str = "with_signature_id";
+pub(super) const WITH_FILE_LINKS_KEY: &str = "with_file_links";
+pub(super) const WITH_TIMESTAMP_SECONDS_KEY: &str = "with_timestamp_seconds";
 const ROTATE_INCREMENTAL_PDF_KEY: &str = "rotate_incremental_pdf";
-const WITH_SUBMITTER_TIMEZONE_KEY: &str = "with_submitter_timezone";
+pub(super) const WITH_SUBMITTER_TIMEZONE_KEY: &str = "with_submitter_timezone";
 const WITH_SIGNATURE_ID_REASON_KEY: &str = "with_signature_id_reason";
 const WITH_SIGNATURE_ID_COMPLETED_AT_KEY: &str = "with_signature_id_completed_at";
 const ESIGNING_PREFERENCE_KEY: &str = "esigning_preference";
-const TIMESTAMP_SERVER_URL_KEY: &str = "timestamp_server_url";
+pub(super) const TIMESTAMP_SERVER_URL_KEY: &str = "timestamp_server_url";
 
 /// `EnsureResultGenerated::CHECK_COMPLETE_TIMEOUT`.
 const CHECK_COMPLETE_TIMEOUT: Duration = Duration::from_secs(90);
 
-fn unsupported(what: &str) -> AppError {
+pub(super) fn unsupported(what: &str) -> AppError {
     anyhow::anyhow!("{what} is not supported yet").into()
 }
 
 #[allow(clippy::needless_pass_by_value, reason = "used with map_err")]
-fn pdf_error(err: EditError) -> AppError {
+pub(super) fn pdf_error(err: EditError) -> AppError {
     anyhow::anyhow!("result documents: {err}").into()
 }
 
@@ -243,7 +243,7 @@ async fn generate(
 }
 
 /// `Accounts.load_signing_pkcs(account)` for the generated `esign_certs`.
-async fn load_signing_key(
+pub(super) async fn load_signing_key(
     state: &AppState,
     account_id: i64,
 ) -> Result<Option<SigningKey>, AppError> {
@@ -442,6 +442,8 @@ fn add_document_id(
                 line_height: None,
                 fill_color: None,
                 white_underlay: true,
+                underline: false,
+                link: None,
             });
             let fitted = Layouter::new(Align::Left, Valign::Top).fit(
                 vec![Input::Text(Fragment::new(&text, &style))],
@@ -456,7 +458,7 @@ fn add_document_id(
 }
 
 /// `FONT_NAME`: GoNoto when the font files are installed, else Helvetica.
-fn default_font() -> &'static str {
+pub(super) fn default_font() -> &'static str {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *AVAILABLE.get_or_init(|| loco_pdf::edit::fonts::load(FONT_NAME, "none").is_ok()) {
         FONT_NAME
@@ -474,7 +476,7 @@ fn locale(form: &Form) -> String {
         .to_owned()
 }
 
-fn ruby_to_s(value: &Value) -> String {
+pub(super) fn ruby_to_s(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::String(s) => s.clone(),
@@ -483,7 +485,7 @@ fn ruby_to_s(value: &Value) -> String {
 }
 
 /// `Array.wrap(value)`.
-fn wrap(value: Option<&Value>) -> Vec<Value> {
+pub(super) fn wrap(value: Option<&Value>) -> Vec<Value> {
     match value {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(items)) => items.clone(),
@@ -492,13 +494,13 @@ fn wrap(value: Option<&Value>) -> Vec<Value> {
 }
 
 /// The submitter's uploaded attachments with their blobs.
-struct Uploads {
-    items: Vec<(Attachment, Blob)>,
-    data: HashMap<String, Arc<Vec<u8>>>,
+pub(super) struct Uploads {
+    pub(super) items: Vec<(Attachment, Blob)>,
+    pub(super) data: HashMap<String, Arc<Vec<u8>>>,
 }
 
 impl Uploads {
-    fn find(&self, uuid: &str) -> Option<&(Attachment, Blob)> {
+    pub(super) fn find(&self, uuid: &str) -> Option<&(Attachment, Blob)> {
         self.items.iter().find(|(a, _)| a.uuid == uuid)
     }
 
@@ -519,7 +521,7 @@ impl Uploads {
     }
 
     /// `ImageUtils.load_vips` with `GenerateResultAttachments`' rescue: `None` skips the area.
-    async fn image(
+    pub(super) async fn image(
         &mut self,
         state: &AppState,
         uuid: &str,
@@ -559,7 +561,7 @@ fn resize(image: &image::DynamicImage, scale: f64) -> image::DynamicImage {
 }
 
 /// `TextUtils::RTL_REGEXP`.
-fn is_rtl(text: &str) -> bool {
+pub(super) fn is_rtl(text: &str) -> bool {
     text.chars().any(|c| matches!(u32::from(c), 0x0590..=0x05FF | 0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB1D..=0xFB4F | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF))
 }
 
@@ -756,6 +758,8 @@ async fn fill_area(
             line_height,
             fill_color: fill,
             white_underlay: false,
+            underline: false,
+            link: None,
         })
     };
     let layouter_style = style(font_size, None, None);
@@ -1423,7 +1427,7 @@ async fn build_pdf_attachment(
     let now = Utc::now();
     pdf.editor
         .set_info_text("Creator", "DocuSeal (https://www.docuseal.com)");
-    let date = now.format("D:%Y%m%d%H%M%S+00'00'").to_string();
+    let date = now.format("D:%Y%m%d%H%M%S").to_string();
     let bytes = match (reason, key) {
         (Some(reason), Some(key)) => pdf
             .editor

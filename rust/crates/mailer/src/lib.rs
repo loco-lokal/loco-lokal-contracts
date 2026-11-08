@@ -250,14 +250,22 @@ impl Mailer {
         let mut builder = lettre::Message::builder()
             .from(parse_mailbox(&from)?)
             .subject(&email.subject);
+        // Each entry may itself be a list (`"a@x.test, \"B\" <b@x.test>"`), as Mail
+        // accepts for `to:`.
         for to in &email.to {
-            builder = builder.to(parse_mailbox(to)?);
+            for mailbox in parse_mailboxes(to)? {
+                builder = builder.to(mailbox);
+            }
         }
         for cc in &email.cc {
-            builder = builder.cc(parse_mailbox(cc)?);
+            for mailbox in parse_mailboxes(cc)? {
+                builder = builder.cc(mailbox);
+            }
         }
         for bcc in &email.bcc {
-            builder = builder.bcc(parse_mailbox(bcc)?);
+            for mailbox in parse_mailboxes(bcc)? {
+                builder = builder.bcc(mailbox);
+            }
         }
         if let Some(reply_to) = &email.reply_to {
             builder = builder.reply_to(parse_mailbox(reply_to)?);
@@ -383,6 +391,13 @@ fn resolve_from(from: &str, rule: &SenderOverride) -> String {
             .cloned()
             .unwrap_or_else(|| from.to_owned()),
     }
+}
+
+fn parse_mailboxes(addresses: &str) -> Result<Vec<Mailbox>, MailerError> {
+    addresses
+        .parse::<lettre::message::Mailboxes>()
+        .map(|list| list.into_iter().collect())
+        .map_err(|_| MailerError::Address(addresses.to_owned()))
 }
 
 fn parse_mailbox(address: &str) -> Result<Mailbox, MailerError> {

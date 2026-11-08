@@ -64,6 +64,32 @@ impl Node {
     }
 }
 
+/// Start tags that close an open `p` first, as libxml2's HTML parser does
+/// (`<p>a<p>b` is two paragraphs).
+const CLOSES_P: &[&str] = &[
+    "address",
+    "blockquote",
+    "center",
+    "dir",
+    "div",
+    "dl",
+    "fieldset",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "menu",
+    "ol",
+    "p",
+    "pre",
+    "table",
+    "ul",
+];
+
 /// An open element: name, attributes and the children so far.
 type OpenElement = (String, Vec<(String, String)>, Vec<Node>);
 
@@ -113,6 +139,12 @@ impl TokenSink for TreeSink {
                             .iter()
                             .map(|a| (a.name.local.to_string(), a.value.to_string()))
                             .collect();
+                        if CLOSES_P.contains(&name.as_str())
+                            && stack.len() > 1
+                            && stack.last().is_some_and(|(n, ..)| n == "p")
+                        {
+                            Self::close_top(&mut stack);
+                        }
                         if VOID_ELEMENTS.contains(&name.as_str()) || tag.self_closing {
                             if let Some(top) = stack.last_mut() {
                                 top.2.push(Node::Element {
@@ -327,6 +359,11 @@ mod tests {
 
     #[test]
     fn wraps_long_lines() {
+        assert_eq!(
+            html_to_plain_text("<p>One\n<p>Two</p>"),
+            "One\n\nTwo",
+            "an unclosed paragraph ends where the next starts"
+        );
         let text = html_to_plain_text(&format!("<p>{}</p>", "word ".repeat(20)));
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2);

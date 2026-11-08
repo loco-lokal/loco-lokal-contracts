@@ -193,6 +193,12 @@ impl Vars {
         }))
     }
 
+    /// The submission's recipients.
+    #[must_use]
+    pub fn submitters(&self) -> &[Submitter] {
+        &self.submitters
+    }
+
     #[must_use]
     pub fn template_submitters(&self) -> &[Value] {
         self.submission

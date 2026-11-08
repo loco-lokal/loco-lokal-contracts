@@ -112,8 +112,8 @@ cd rust/scripts/parity
 ./compare.py "$PARITY_TOKEN" GET /api/templates GET /api/submissions   # reads: method/path pairs, optional JSON body
 ./writes.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # template clone/update/archive, submission update/archive
 ./create.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # submission create modes and errors, submitter updates; compares stored rows
-./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows
-./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined and next-party emails via Mailpit, email_events rows
+./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs, audit trail
+./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined, next-party and completed emails via Mailpit, email_events rows
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ```
 
@@ -143,6 +143,14 @@ Phase 4b generates the result documents in the completion job (`signing/results.
 
 `scripts/fetch-fonts.sh` downloads the fonts into `rust/vendor/fonts`. Without them, text falls back to Helvetica, as it does in Rails. The PDFs differ from HexaPDF's byte for byte, so `signing.py` compares rendered pages and checks the signatures with poppler.
 
+Phase 4c adds the audit trail and the completed emails:
+
+- `signing/audit.rs` ports `Submissions::GenerateAuditTrail` and `EnsureAuditGenerated`: documents and checksums, the parties with their verification details and values, and the event log. It is PDF/A-3u with GoNoto, signed like the results, and attached to the submission as `audit_trail`, so `audit_log_url` is filled in the API and webhooks.
+- `loco_pdf::edit::compose` is the part of HexaPDF's composer the audit trail uses: frames with floats, text and image boxes, rules, column and table boxes that split across pages.
+- `signing/emails.rs` sends `SubmitterMailer#completed_email` to the sender and the BCC addresses, and `#documents_copy_email` to the parties, with the result documents, the audit trail and uploaded files attached (up to 10 MB, `document_filename_format` applied).
+
+`signing.py` compares the audit trails word by word (positions to 0.01 pt; ids, checksums and addresses may differ in text only), as rendered pages, by metadata and by signature. Saved documents carry HexaPDF's `Producer` and its zone-less UTC dates, as the Rails documents do.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -153,7 +161,8 @@ These parts return 422 ("not supported yet") or are still missing:
   - PDF/A output.
 - Right-to-left text is drawn in logical order, where Rails reorders it visually.
 - Form fields that need their appearances generated (`NeedAppearances`) are left unflattened.
-- The audit trail (Phase 4c), sent as `audit_log_url: null`, and the completed emails that attach it.
+- Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet", as does right-to-left text in the audit trail and a timestamp server for its signature.
+- The `sig` download links of documents copy emails (only sent by `/send_submission_email`, not ported).
 - The start form `/d/:slug` and resubmitting (Phase 4).
 - Email two-factor verification on the signing form (422), and the 2FA cookie checks.
 - Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.

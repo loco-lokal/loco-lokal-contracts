@@ -1842,6 +1842,7 @@ dependencies = [
  "loco-storage",
  "loco-views",
  "md-5",
+ "mime_guess",
  "multer",
  "percent-encoding",
  "rand 0.10.3",

@@ -4,6 +4,7 @@
 
 pub mod canvas;
 mod colors;
+pub mod compose;
 pub mod fonts;
 mod glyph_names;
 pub mod layout;
@@ -18,6 +19,11 @@ use std::{
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, StringFormat};
 
 pub use canvas::{Canvas, parse_color};
+pub use lopdf;
+
+/// The `Producer` HexaPDF writes into every document it saves. The Rails backend's
+/// documents carry it, so the ported output keeps it until cutover.
+pub const PRODUCER: &str = "HexaPDF version 1.7.0";
 use fonts::{FontData, Glyph, UsedFont};
 use layout::Fitted;
 
@@ -134,6 +140,85 @@ impl Editor {
         let name = editor.use_image(page, info.index);
         editor.overlay(page).image(&name, 0.0, 0.0, w, h);
         Ok(editor)
+    }
+
+    /// A new document with an empty page tree (`HexaPDF::Document.new`), to add pages to.
+    pub fn blank() -> Result<Self, EditError> {
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let mut pages = Dictionary::new();
+        pages.set("Type", Object::Name(b"Pages".to_vec()));
+        pages.set("Kids", Object::Array(Vec::new()));
+        pages.set("Count", Object::Integer(0));
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", Object::Reference(pages_id));
+        let catalog_id = doc.add_object(catalog);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes)
+            .map_err(|e| EditError::Invalid(e.to_string()))?;
+        Self::load(bytes)
+    }
+
+    /// Appends an empty page with the media box `[0 0 width height]`.
+    pub fn add_page(&mut self, width: f64, height: f64) -> Result<ObjectId, EditError> {
+        let pages_id = self
+            .catalog()
+            .and_then(|c| c.get(b"Pages").ok())
+            .and_then(|p| p.as_reference().ok())
+            .ok_or_else(|| EditError::Invalid("no page tree".to_owned()))?;
+        let mut page = Dictionary::new();
+        page.set("Type", Object::Name(b"Page".to_vec()));
+        page.set("Parent", Object::Reference(pages_id));
+        page.set(
+            "MediaBox",
+            Object::Array(vec![0.into(), 0.into(), real(width), real(height)]),
+        );
+        page.set("Resources", Object::Dictionary(Dictionary::new()));
+        page.set("Contents", Object::Array(Vec::new()));
+        let id = self.add(Object::Dictionary(page));
+        if let Some(pages) = self.dict_mut(pages_id) {
+            let mut kids = pages
+                .get(b"Kids")
+                .ok()
+                .and_then(|k| k.as_array().ok())
+                .cloned()
+                .unwrap_or_default();
+            kids.push(Object::Reference(id));
+            pages.set(
+                "Count",
+                Object::Integer(i64::try_from(kids.len()).unwrap_or(0)),
+            );
+            pages.set("Kids", Object::Array(kids));
+        }
+        Ok(id)
+    }
+
+    fn catalog(&self) -> Option<&Dictionary> {
+        let root = self.doc.trailer.get(b"Root").ok()?.as_reference().ok()?;
+        self.dict(root)
+    }
+
+    /// Adds an object to the document (written with the next save).
+    pub fn add_object(&mut self, object: Object) -> ObjectId {
+        self.add(object)
+    }
+
+    /// Sets an entry of the document catalog.
+    pub fn set_catalog(&mut self, key: &str, value: Object) -> Result<(), EditError> {
+        let root = self
+            .doc
+            .trailer
+            .get(b"Root")
+            .ok()
+            .and_then(|r| r.as_reference().ok())
+            .ok_or_else(|| EditError::Invalid("no catalog".to_owned()))?;
+        if let Some(catalog) = self.dict_mut(root) {
+            catalog.set(key, value);
+        }
+        Ok(())
     }
 
     fn next_id(&mut self) -> ObjectId {
@@ -777,7 +862,7 @@ impl Editor {
         Ok((font, format!("DSF{index}")))
     }
 
-    /// Draws laid-out text on a page's overlay.
+    /// Draws laid-out text on a page's overlay, with link annotations for linked text.
     pub fn draw_text(&mut self, page: ObjectId, fitted: &Fitted, x: f64, y: f64) {
         self.overlay(page);
         let mut canvas = self.overlays.remove(&page).expect("overlay");
@@ -787,8 +872,47 @@ impl Editor {
             images: &self.images,
             used: use_,
         };
-        canvas.draw(fitted, x, y, &mut resources);
+        let links = canvas.draw(fitted, x, y, &mut resources);
         self.overlays.insert(page, canvas);
+        let origin = self.page_box(page);
+        for link in links {
+            let rect = link.rect;
+            self.add_layer_link(
+                page,
+                [
+                    rect[0] + origin[0],
+                    rect[1] + origin[1],
+                    rect[2] + origin[0],
+                    rect[3] + origin[1],
+                ],
+                &link.uri,
+            );
+        }
+    }
+
+    /// `Style::LinkLayer` with a URI: a borderless link annotation with quad points.
+    fn add_layer_link(&mut self, page: ObjectId, rect: [f64; 4], uri: &str) {
+        let [l, b, r, t] = rect;
+        let mut action = Dictionary::new();
+        action.set("S", Object::Name(b"URI".to_vec()));
+        action.set("URI", Object::string_literal(uri));
+        let mut annot = Dictionary::new();
+        annot.set("Type", Object::Name(b"Annot".to_vec()));
+        annot.set("Subtype", Object::Name(b"Link".to_vec()));
+        annot.set(
+            "Rect",
+            Object::Array(rect.iter().map(|v| real(*v)).collect()),
+        );
+        annot.set(
+            "QuadPoints",
+            Object::Array([l, b, r, b, r, t, l, t].iter().map(|v| real(*v)).collect()),
+        );
+        annot.set("A", Object::Dictionary(action));
+        annot.set("Border", Object::Array(vec![0.into(), 0.into(), 0.into()]));
+        let id = self.add(Object::Dictionary(annot));
+        let mut annots = self.annotation_ids(page);
+        annots.push(id);
+        self.set_annotations(page, annots);
     }
 
     /// Marks an image as used on a page and returns its resource name.
@@ -1181,6 +1305,7 @@ impl Editor {
         self.finish()?;
         self.update_id();
         self.set_info("ModDate", pdf_date(now));
+        self.set_info_text("Producer", PRODUCER);
         let objects: Vec<(ObjectId, &Object)> = self
             .dirty
             .iter()

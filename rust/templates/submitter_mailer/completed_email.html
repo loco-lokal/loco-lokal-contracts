@@ -1,0 +1,11 @@
+{#- Port of app/views/submitter_mailer/completed_email.html.erb -#}
+{% extends "layouts/mailer.html" %}
+{% block content %}
+{%- if custom_body %}
+{{ custom_body | safe }}
+{%- else %}
+<p>{{ t('hi_there') }},</p>
+<p>{{ t('name_has_been_completed_by_submitters', name=name, submitters=submitters) }}</p>
+<p><a href="{{ submission_url }}">{{ submission_url }}</a></p>
+{%- endif %}
+{% endblock %}

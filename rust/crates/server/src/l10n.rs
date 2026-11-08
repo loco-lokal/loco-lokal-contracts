@@ -109,7 +109,8 @@ fn with_delimiter(state: &AppState, locale: &str, text: &str) -> String {
 }
 
 /// `number_to_currency(number, locale:, precision: 2, unit:)`.
-fn currency(state: &AppState, locale: &str, text: &str, unit: &str) -> String {
+#[must_use]
+pub fn currency(state: &AppState, locale: &str, text: &str, unit: &str) -> String {
     let i18n = state.views.i18n();
     let Ok(number) = text.trim().parse::<f64>() else {
         return text.to_owned();

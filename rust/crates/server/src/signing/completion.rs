@@ -1,9 +1,8 @@
 //! `ProcessSubmitterCompletionJob`: after a submitter completes the form, record the
-//! completion, invite the next parties of an ordered submission, and send the
-//! `form.completed` and `submission.completed` webhooks.
-//!
-//! Result documents are generated here (`signing::results`); the audit trail and the
-//! completed emails (which attach both) come with a later step of Phase 4.
+//! completion, generate the result documents (`signing::results`), and once the last
+//! party has completed, the audit trail (`signing::audit`) and the completed emails
+//! (`signing::emails`). Then invite the next parties of an ordered submission and send
+//! the `form.completed` and `submission.completed` webhooks.
 
 use std::collections::HashMap;
 
@@ -86,6 +85,12 @@ async fn process(state: &AppState, job: &ProcessSubmitterCompletion) -> Result<(
     };
 
     super::results::ensure_result_generated(state, &form.submitter).await?;
+
+    if is_last {
+        super::audit::check_combined(state, form.submission.account_id).await?;
+        super::audit::ensure_audit_generated(state, form.submission.id).await?;
+        super::emails::enqueue_completed_emails(state, &form).await?;
+    }
 
     create_completed_documents(state, &form.submitter).await?;
 

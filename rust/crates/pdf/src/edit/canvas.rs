@@ -21,10 +21,22 @@ pub trait Resources {
     fn image(&self, image: usize) -> String;
 }
 
+/// A link annotation to add for text drawn with a `link` style: its rectangle
+/// (`[left, bottom, right, top]`) and URI.
+pub struct TextLink {
+    pub rect: [f64; 4],
+    pub uri: String,
+}
+
 impl Canvas {
     fn push(&mut self, text: &str) {
         self.ops.extend_from_slice(text.as_bytes());
         self.ops.push(b'\n');
+    }
+
+    /// Appends content stream operators as they are.
+    pub fn raw(&mut self, ops: &str) {
+        self.push(ops);
     }
 
     pub fn fill_rect(&mut self, color: [f64; 3], x: f64, y: f64, w: f64, h: f64) {
@@ -67,8 +79,15 @@ impl Canvas {
         self.push(&format!("q {} cm /{name} Do Q", m.join(" ")));
     }
 
-    /// `TextLayouter::Result#draw(canvas, x, y)`.
-    pub fn draw(&mut self, fitted: &Fitted, x: f64, mut y: f64, resources: &mut dyn Resources) {
+    /// `TextLayouter::Result#draw(canvas, x, y)`. Returns the links to annotate.
+    pub fn draw(
+        &mut self,
+        fitted: &Fitted,
+        x: f64,
+        mut y: f64,
+        resources: &mut dyn Resources,
+    ) -> Vec<TextLink> {
+        let mut links = Vec::new();
         self.push("q");
         for line in &fitted.lines {
             y -= line.y_offset;
@@ -124,6 +143,29 @@ impl Canvas {
                             write_object(&mut self.ops, &Object::Array(array));
                             self.push(" TJ ET");
                         }
+                        if style.underline {
+                            // `calculated_underline_position`/`_thickness`.
+                            let (position, thickness) = style.font.underline();
+                            let thickness = thickness * style.font_size / 1000.0;
+                            let offset = position * style.font_size / 1000.0 - thickness / 2.0;
+                            self.push(&format!(
+                                "q {} RG {} w 0 J [] 0 d {} {} m {} {} l S Q",
+                                color_ops(style.fill_color.unwrap_or([0.0; 3])),
+                                real(thickness),
+                                real(item_x),
+                                real(y + offset),
+                                real(item_x + fragment.width()),
+                                real(y + offset)
+                            ));
+                        }
+                        if let Some(uri) = &style.link {
+                            let bottom = y + style.y_min();
+                            let height = style.y_max().max(0.0) - style.y_min().min(0.0);
+                            links.push(TextLink {
+                                rect: [item_x, bottom, item_x + fragment.width(), bottom + height],
+                                uri: uri.clone(),
+                            });
+                        }
                         item_x += fragment.width();
                     }
                     LineItem::Inline(inline) => {
@@ -141,6 +183,7 @@ impl Canvas {
             }
         }
         self.push("Q");
+        links
     }
 }
 

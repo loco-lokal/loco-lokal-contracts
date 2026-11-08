@@ -400,3 +400,28 @@ pub async fn encrypted_config_with_fallback(
     .fetch_optional(db)
     .await?)
 }
+
+/// A `submitter_versions` row: the contact details a submitter had before a change.
+#[derive(Clone, Debug)]
+pub struct SubmitterVersion {
+    pub submitter_id: i64,
+    pub created_at: NaiveDateTime,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+
+/// The submitters' versions, oldest first (`submitter_versions.sort_by(&:created_at)`).
+pub async fn submitter_versions(
+    db: impl PgExecutor<'_>,
+    submitter_ids: &[i64],
+) -> Result<Vec<SubmitterVersion>, DbError> {
+    Ok(sqlx::query_as!(
+        SubmitterVersion,
+        r#"SELECT submitter_id, created_at, name, email, phone FROM submitter_versions
+           WHERE submitter_id = ANY($1) ORDER BY created_at, id"#,
+        submitter_ids
+    )
+    .fetch_all(db)
+    .await?)
+}

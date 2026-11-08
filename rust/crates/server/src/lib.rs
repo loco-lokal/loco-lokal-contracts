@@ -52,6 +52,8 @@ pub fn job_registry() -> loco_jobs::Registry<JobContext> {
         .register::<search::ReindexSearchEntry>()
         .register::<mail::SendInvitation>()
         .register::<mail::SendDeclined>()
+        .register::<signing::emails::SendCompleted>()
+        .register::<signing::emails::SendDocumentsCopy>()
         .register::<signing::completion::ProcessSubmitterCompletion>()
 }
 

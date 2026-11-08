@@ -1,0 +1,18 @@
+{#- Port of app/views/submitter_mailer/documents_copy_email.html.erb (its second paragraph
+    is not closed there either) -#}
+{% extends "layouts/mailer.html" %}
+{% block content %}
+{%- if custom_body %}
+{{ custom_body | safe }}
+{%- else %}
+<p>{{ t('hi_there') }},</p>
+<p>{{ t('please_check_the_copy_of_your_name_in_the_email_attachments', name=name) }}
+<p>{{ t('alternatively_you_can_review_and_download_your_copy_using_the_link_below') }}</p>
+<p>
+<a href="{{ preview_url }}">{{ name }}</a>
+</p>
+<p>
+{{ t('thanks') }},<br>{{ account_name }}
+</p>
+{%- endif %}
+{% endblock %}

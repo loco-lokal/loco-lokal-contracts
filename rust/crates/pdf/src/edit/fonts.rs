@@ -37,6 +37,8 @@ pub struct TrueTypeData {
     cap_height: f64,
     italic_angle: f64,
     bbox: [f64; 4],
+    /// `post` underline position and thickness (1/1000 em).
+    underline: (f64, f64),
 }
 
 impl TrueTypeData {
@@ -72,6 +74,12 @@ impl TrueTypeData {
             .and_then(skrifa::raw::tables::os2::Os2::s_cap_height)
             .map_or(ascender, f64::from);
         let italic_angle = font.post().map_or(0.0, |post| post.italic_angle().to_f64());
+        let underline = font.post().map_or((-100.0, 50.0), |post| {
+            (
+                f64::from(post.underline_position().to_i16()) * scale,
+                f64::from(post.underline_thickness().to_i16()) * scale,
+            )
+        });
         Ok(Self {
             name,
             data,
@@ -86,6 +94,7 @@ impl TrueTypeData {
                 f64::from(head.x_max()) * scale,
                 f64::from(head.y_max()) * scale,
             ],
+            underline,
         })
     }
 
@@ -102,6 +111,7 @@ pub struct Afm {
     by_name: HashMap<String, u16>,
     ascender: f64,
     descender: f64,
+    underline: (f64, f64),
 }
 
 impl Afm {
@@ -110,7 +120,13 @@ impl Afm {
         let mut ascender = 0.0;
         let mut descender = 0.0;
         let mut bbox = [0.0; 4];
+        let mut underline = (-100.0, 50.0);
         for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("UnderlinePosition ") {
+                underline.0 = rest.trim().parse().unwrap_or(underline.0);
+            } else if let Some(rest) = line.strip_prefix("UnderlineThickness ") {
+                underline.1 = rest.trim().parse().unwrap_or(underline.1);
+            }
             if let Some(rest) = line.strip_prefix("Ascender ") {
                 ascender = rest.trim().parse().unwrap_or(0.0);
             } else if let Some(rest) = line.strip_prefix("Descender ") {
@@ -152,6 +168,7 @@ impl Afm {
             by_name,
             ascender,
             descender,
+            underline,
         }
     }
 
@@ -180,6 +197,15 @@ impl FontData {
         match self {
             Self::TrueType(f) => f.descender,
             Self::Type1(f) => f.descender,
+        }
+    }
+
+    /// Underline position (below the baseline, negative) and thickness, in 1/1000 em.
+    #[must_use]
+    pub fn underline(&self) -> (f64, f64) {
+        match self {
+            Self::TrueType(f) => f.underline,
+            Self::Type1(f) => f.underline,
         }
     }
 

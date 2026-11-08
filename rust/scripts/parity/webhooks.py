@@ -86,6 +86,20 @@ def mask_ip(value):
     return value
 
 
+def stabilize(body):
+    """Rails reads `submission_events` without an order (physical row order, which drifts
+    once rows are deleted), so they are compared in time order. `form.started` is enqueued
+    before the same request saves the values (`Submitters::SubmitValues`), so whether its
+    `values` include them depends on when the job runs, in either backend."""
+    data = body.get("data")
+    if isinstance(data, dict):
+        if isinstance(data.get("submission_events"), list):
+            data["submission_events"].sort(key=lambda e: (e["event_timestamp"], e["event_type"]))
+        if body.get("event_type") == "form.started" and "values" in data:
+            data["values"] = "<racy>"
+    return body
+
+
 def summarize(requests, hmac_secret):
     result = []
     for r in requests:
@@ -98,7 +112,7 @@ def summarize(requests, hmac_secret):
             "user_agent": headers.get("user-agent"),
             "custom": headers.get("x-custom"),
             "signature_valid": hmac.compare_digest(expected, digest),
-            "body": mask_ip(json.loads(r["body"])),
+            "body": stabilize(mask_ip(json.loads(r["body"]))),
         })
     return sorted(result, key=lambda r: (r["body"]["event_type"], json.dumps(r["body"], sort_keys=True)))
 
@@ -171,6 +185,15 @@ def main():
         _, template = call(RAILS, token, "GET", f"/api/templates/{t}")
         uuids = {f["name"]: f["uuid"] for f in template["fields"]}
 
+        # A draft save starts the form; completing it in the same request would race the
+        # form.started job against the completion in either backend.
+        def start(base):
+            browser, slug, _ = signers[base]
+            return browser.request("POST", f"/s/{slug}", [
+                ("_method", "put"), ("authenticity_token", browser.csrf),
+                (f"values[{uuids['Full Name']}]", "Hook")], files={})
+        compare("form.started", url_id, secret, start, 1)
+
         def complete(base):
             browser, slug, _ = signers[base]
             upload = browser.request("POST", f"/s/{slug}/upload", [("type", "signature")],
@@ -179,9 +202,8 @@ def main():
                       (f"values[{uuids['Full Name']}]", "Hook"),
                       (f"values[{uuids['Signature']}]", json.loads(upload[1])["uuid"]), ("completed", "true")]
             return browser.request("POST", f"/s/{slug}", fields, files={})
-        # `documents` in form.completed and submission.completed are result PDFs (Phase 4b);
-        # `audit_log_url` stays null until the audit trail (Phase 4c).
-        compare("form.started, form.completed, submission.completed", url_id, secret, complete, 3)
+        # `documents` are the result PDFs and `audit_log_url` the audit trail.
+        compare("form.completed, submission.completed", url_id, secret, complete, 2)
 
         declining = compare("submission.created (to decline)", url_id, secret, create, 1)
         for name in declining:

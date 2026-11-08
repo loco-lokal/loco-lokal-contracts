@@ -1,6 +1,7 @@
 //! Text layout: a port of the parts of `HexaPDF::Layout::TextLayouter` the result
-//! documents use (simple segmentation, fixed-width line wrapping, single line spacing,
-//! text and baseline-aligned inline boxes, and left/center/right/justify alignment).
+//! documents and the audit trail use (simple segmentation, fixed-width line wrapping,
+//! proportional line spacing, text and baseline-aligned inline boxes, and
+//! left/center/right/justify alignment).
 
 use std::sync::Arc;
 
@@ -30,6 +31,9 @@ pub struct TextStyle {
     pub fill_color: Option<[f64; 3]>,
     /// A white rectangle behind the text (the Document ID footer's underlay).
     pub white_underlay: bool,
+    pub underline: bool,
+    /// A URI the text links to (a `[:link, {uri:}]` overlay).
+    pub link: Option<String>,
 }
 
 impl TextStyle {
@@ -243,6 +247,8 @@ impl Line {
 pub struct Fitted {
     pub status: Status,
     pub lines: Vec<Line>,
+    /// What did not fit (`remaining_items`), to continue in another box.
+    pub remaining: Vec<Segment>,
 }
 
 impl Fitted {
@@ -250,10 +256,18 @@ impl Fitted {
     pub fn lines_height(&self) -> f64 {
         self.lines.iter().map(Line::height).sum()
     }
+
+    /// `Result#height`: the baseline offsets plus the last line's descent.
+    #[must_use]
+    pub fn height(&self) -> f64 {
+        self.lines.iter().map(|l| l.y_offset).sum::<f64>()
+            - self.lines.last().map_or(0.0, Line::y_min)
+    }
 }
 
+/// A text segment: a box, glue, or penalty of `SimpleTextSegmentation`.
 #[derive(Clone)]
-enum Segment {
+pub enum Segment {
     Box(LineItem),
     Glue(Fragment),
     Penalty {
@@ -304,7 +318,8 @@ fn is_break(text: &str) -> bool {
 }
 
 /// `SimpleTextSegmentation`.
-fn segment(items: Vec<Input>) -> Vec<Segment> {
+#[must_use]
+pub fn segment(items: Vec<Input>) -> Vec<Segment> {
     let mut result = Vec::new();
     for input in items {
         let fragment = match input {
@@ -571,17 +586,30 @@ impl Wrapper<'_> {
     }
 }
 
-/// `TextLayouter` with a style of `text_align`/`text_valign` and single line spacing.
+/// `TextLayouter` with a style of `text_align`/`text_valign` and proportional
+/// `line_spacing`.
 #[derive(Clone, Copy, Debug)]
 pub struct Layouter {
     pub align: Align,
     pub valign: Valign,
+    /// Proportional line spacing (1 is single).
+    pub line_spacing: f64,
 }
 
 impl Layouter {
     #[must_use]
     pub fn new(align: Align, valign: Valign) -> Self {
-        Self { align, valign }
+        Self {
+            align,
+            valign,
+            line_spacing: 1.0,
+        }
+    }
+
+    #[must_use]
+    pub fn with_line_spacing(mut self, line_spacing: f64) -> Self {
+        self.line_spacing = line_spacing;
+        self
     }
 
     /// `fit(items, width, height)`; `empty` is the style a blank line's empty fragment
@@ -594,7 +622,18 @@ impl Layouter {
         height: f64,
         empty: &Arc<TextStyle>,
     ) -> Fitted {
-        let mut rest = segment(items);
+        self.fit_segments(segment(items), width, height, empty)
+    }
+
+    /// `fit` for items already segmented (`remaining_items` of an earlier fit).
+    #[must_use]
+    pub fn fit_segments(
+        &self,
+        mut rest: Vec<Segment>,
+        width: f64,
+        height: f64,
+        empty: &Arc<TextStyle>,
+    ) -> Fitted {
         let mut lines: Vec<Line> = Vec::new();
         let mut actual_height = 0.0;
         let mut previous: Option<(f64, f64)> = None;
@@ -630,15 +669,15 @@ impl Layouter {
                     return Yield::Stop;
                 }
                 let (y_min, y_max) = line.dimensions();
-                let new_height = actual_height + (y_max - y_min);
+                // `LineSpacing#gap` and `#baseline_distance` (proportional).
+                let distance = previous.map(|(prev_min, _): (f64, f64)| prev_min.abs() + y_max);
+                let gap = distance.map_or(0.0, |d| d * (self.line_spacing - 1.0));
+                let new_height = actual_height + (y_max - y_min) + gap;
                 if new_height > height {
                     return Yield::Stop;
                 }
                 line.x_offset = self.horizontal_offset(&mut line, width);
-                line.y_offset = match previous {
-                    None => 0.0,
-                    Some((prev_min, _)) => prev_min.abs() + y_max,
-                };
+                line.y_offset = distance.map_or(0.0, |d| d * self.line_spacing);
                 previous = Some((y_min, y_max));
                 actual_height = new_height;
                 lines.push(line);
@@ -678,7 +717,11 @@ impl Layouter {
                 Valign::Bottom => (height - actual_height) + y_max,
             };
         }
-        Fitted { status, lines }
+        Fitted {
+            status,
+            lines,
+            remaining: rest,
+        }
     }
 
     fn horizontal_offset(self, line: &mut Line, available: f64) -> f64 {
@@ -744,7 +787,33 @@ mod tests {
             line_height: None,
             fill_color: None,
             white_underlay: false,
+            underline: false,
+            link: None,
         })
+    }
+
+    #[test]
+    fn spaces_lines_proportionally() {
+        let s = style(10.0);
+        let layouter = Layouter::new(Align::Left, Valign::Top).with_line_spacing(1.3);
+        let fitted = layouter.fit(
+            vec![Input::Text(Fragment::new("a\nb", &s))],
+            100.0,
+            100.0,
+            &s,
+        );
+        assert_eq!(fitted.lines.len(), 2);
+        assert!((fitted.lines[1].y_offset - (2.07 + 7.18) * 1.3).abs() < 1e-9);
+        assert!((fitted.height() - (7.18 + (2.07 + 7.18) * 1.3 + 2.07)).abs() < 1e-9);
+
+        let fitted = layouter.fit(
+            vec![Input::Text(Fragment::new("a\nb", &s))],
+            100.0,
+            12.0,
+            &s,
+        );
+        assert_eq!(fitted.status, Status::Height);
+        assert_eq!(fitted.remaining.len(), 1);
     }
 
     #[test]

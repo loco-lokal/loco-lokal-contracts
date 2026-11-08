@@ -17,7 +17,7 @@ from compare import RAILS, RUST, SIGNED, diff, fetch
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)?")
 SLUG = re.compile(r"/(s|d|e)/[A-Za-z0-9]+")
-VOLATILE = {"id", "slug", "submission_id", "template_id", "folder_id", "attachment_uuid", "created_by_user_id"}
+VOLATILE = {"id", "slug", "submission_id", "submitter_id", "template_id", "folder_id", "attachment_uuid", "created_by_user_id"}
 
 
 def scrub(value, key=None):

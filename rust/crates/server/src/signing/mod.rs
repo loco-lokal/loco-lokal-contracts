@@ -4,7 +4,9 @@
 //! `Submitters::SubmitValues`.
 
 pub mod actions;
+pub mod audit;
 pub mod completion;
+pub mod emails;
 pub mod pages;
 pub mod results;
 pub mod submit;
