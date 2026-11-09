@@ -30,16 +30,12 @@
               <span class="mr-1"><%= t('profile') %></span>
             <% end %>
           </li>
-            </li>
-          <% end %>
           <% if can?(:read, EncryptedConfig.new(key: EncryptedConfig::ESIGN_CERTS_KEY, account: current_account)) %>
             <li>
               <%= link_to settings_esign_path, class: 'flex items-center' do %>
                 <%= svg_icon('zoom_check', class: 'w-5 h-5 flex-shrink-0 stroke-2') %>
                 <span class="mr-1 whitespace-nowrap"><%= t('verify_pdf') %></span>
               <% end %>
-            </li>
-          <% end %>
             </li>
           <% end %>
           <% if (can?(:manage, EncryptedConfig) && current_user == true_user) || (current_user != true_user && current_account.testing?) %>
