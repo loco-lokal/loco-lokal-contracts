@@ -1,0 +1,132 @@
+diff --git a/README.md b/README.md
+index 40c4ba4..ebd9e7c 100644
+--- a/README.md
++++ b/README.md
+@@ -154,6 +154,13 @@ hostname. This repo only lists the repo and its namespace under `appRepos:`; an
+ turns every chart directory into an Application. Removing a chart directory deletes its
+ Application and resources.
+ 
++An entry can also list `additionalRepos`, each with its own `repoURL`, optional
++`targetRevision`, `chartsPath` and `charts`. These become additional Git generators in the
++same ApplicationSet and namespace; each generated Application uses its own source repository
++and revision. Chart names must be unique across all sources. The `loco-lokal` set uses this
++for `loco-lokal-contracts`, alongside the existing `loco-lokal-internal` charts. The contracts
++app uses its own Infisical store and the `contracts` database on shared PostgreSQL.
++
+ Two things stay here because they're per-cluster: the namespace, and the `ghcr-pull` secret
+ `charts/platform-secrets` creates in it for private images. Secrets an app needs at runtime come
+ from its own Infisical project: a `stores:` entry in `charts/cluster-secret-stores` here, and an
+diff --git a/charts/cluster-secret-stores/values.yaml b/charts/cluster-secret-stores/values.yaml
+index e4eec4e..db41ef0 100644
+--- a/charts/cluster-secret-stores/values.yaml
++++ b/charts/cluster-secret-stores/values.yaml
+@@ -35,6 +35,11 @@ stores:
+     projectSlug: loco-lokal-internal
+     environmentSlug: prod
+     namespaces: [loco-lokal]
++  # DocuSeal runtime key and its password on the shared PostgreSQL server.
++  loco-lokal-contracts:
++    projectSlug: loco-lokal-contracts
++    environmentSlug: prod
++    namespaces: [loco-lokal]
+   # SAM Technixx website (Infisical org Loco-Lokal, project sam-technixx).
+   sam-technixx-website:
+     projectSlug: sam-technixx
+diff --git a/charts/loco-lokal-postgres/values.yaml b/charts/loco-lokal-postgres/values.yaml
+index da04145..198dd1b 100644
+--- a/charts/loco-lokal-postgres/values.yaml
++++ b/charts/loco-lokal-postgres/values.yaml
+@@ -19,11 +19,13 @@ databases:
+   twenty: TWENTY_PG_DATABASE_PASSWORD
+   umami: UMAMI_DB_PASSWORD
+   callcoach: CALL_COACH_DB_PASSWORD
++  contracts: CONTRACTS_DB_PASSWORD
+ 
+ # Products with their own Infisical project can share the server without copying credentials
+ # into loco-lokal-internal. Unlisted databases continue to use secretStore below.
+ databaseSecretStores:
+   callcoach: call-coach
++  contracts: loco-lokal-contracts
+ 
+ # ClusterSecretStore defined in charts/cluster-secret-stores for the Infisical project
+ # loco-lokal-internal; the loco-lokal-internal charts read their secrets through it too.
+diff --git a/charts/root/templates/applicationsets.yaml b/charts/root/templates/applicationsets.yaml
+index 916f8fc..17cf49c 100644
+--- a/charts/root/templates/applicationsets.yaml
++++ b/charts/root/templates/applicationsets.yaml
+@@ -1,12 +1,13 @@
+-{{- /* One ApplicationSet per entry in `appRepos`: every chart under the repo's charts/ becomes an Application. */}}
++{{- /* One ApplicationSet per entry in `appRepos`: charts in its repositories become Applications. */}}
+ 
+ {{- /* Placeholders the ApplicationSet fills in for each chart directory (not Helm values). */}}
+ {{- $chartName := "{{ .path.basename }}" }}
+ {{- $chartPath := "{{ .path.path }}" }}
++{{- $repoURL := "{{ .values.repoURL }}" }}
++{{- $targetRevision := "{{ .values.targetRevision }}" }}
+ 
+ {{- range $name, $repoValues := .Values.appRepos }}
+ {{- $repo := include "root.withDefaults" (dict "defaults" $.Values.defaults "app" $repoValues) | fromYaml }}
+-{{- $revision := $repo.targetRevision | default $.Values.targetRevision }}
+ ---
+ apiVersion: argoproj.io/v1alpha1
+ kind: ApplicationSet
+@@ -17,13 +18,20 @@ spec:
+   goTemplate: true
+   goTemplateOptions: ["missingkey=error"]
+   generators:
++    {{- range $source := concat (list $repo) ($repo.additionalRepos | default list) }}
++    {{- $revision := $source.targetRevision | default $.Values.targetRevision }}
+     - git:
+-        repoURL: {{ required (printf "appRepos.%s.repoURL is required" $name) $repo.repoURL }}
++        repoURL: {{ required (printf "appRepos.%s repoURL is required" $name) $source.repoURL }}
+         revision: {{ $revision }}
++        # Each generator supplies the source of its own charts to the shared template.
++        values:
++          repoURL: {{ $source.repoURL | quote }}
++          targetRevision: {{ $revision | quote }}
+         directories:
+-          {{- range $repo.charts | default (list "*") }}
+-          - path: {{ $repo.chartsPath | default "charts" }}/{{ . }}
++          {{- range $source.charts | default (list "*") }}
++          - path: {{ $source.chartsPath | default "charts" }}/{{ . }}
+           {{- end }}
++    {{- end }}
+   template:
+     metadata:
+       name: '{{ $chartName }}'
+@@ -34,8 +42,8 @@ spec:
+     spec:
+       project: {{ $repo.project | default $.Values.project }}
+       source:
+-        repoURL: {{ $repo.repoURL }}
+-        targetRevision: {{ $revision }}
++        repoURL: '{{ $repoURL }}'
++        targetRevision: '{{ $targetRevision }}'
+         path: '{{ $chartPath }}'
+         helm:
+           releaseName: '{{ $chartName }}'
+diff --git a/charts/root/values.yaml b/charts/root/values.yaml
+index 9eb5f43..a9df655 100644
+--- a/charts/root/values.yaml
++++ b/charts/root/values.yaml
+@@ -130,6 +130,9 @@ apps:
+ # ghcr.io/<owner>/<image>:<github.sha> on every push to the branch.
+ # Optional `charts` deploys only the listed chart directories, e.g. while a repo's services are
+ # migrated one at a time; removing a chart from the list deletes its Application and resources.
++# Optional `additionalRepos` adds git generators to the same ApplicationSet and namespace.
++# Each source has its own repoURL, targetRevision, chartsPath and charts; chart names must be
++# unique across all sources. Existing sources and their chart lists remain independent.
+ appRepos:
+   # Call Coach: one dedicated set/namespace; its chart pins independently published image digests.
+   call-coach:
+@@ -158,6 +161,10 @@ appRepos:
+       - loco-lokal-umami
+       - loco-lokal-ghost
+       - loco-lokal-agent
++    # Contracts has its own code/image repo but belongs to this same product and namespace.
++    additionalRepos:
++      - repoURL: https://github.com/loco-lokal/loco-lokal-contracts.git
++        charts: [loco-lokal-contracts]
+   # Loco Lokal reference sites (repo: loco-lokal-references). Part of the Loco Lokal product, so
+   # it shares the loco-lokal namespace and its ghcr-pull secret; an ApplicationSet scans one repo.
+   loco-lokal-references:

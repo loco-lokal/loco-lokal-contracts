@@ -62,6 +62,10 @@ DocuSeal is an open source platform that provides secure and efficient digital d
 
 ## Deploy
 
+For the Loco Lokal Kubernetes deployment, see [the deployment runbook](docs/deployment.md)
+and [`charts/loco-lokal-contracts`](charts/loco-lokal-contracts). The chart is prepared for
+the `loco-lokal` ApplicationSet and namespace, shared PostgreSQL, and retained document storage.
+
 |Heroku|Railway|
 |:--:|:---:|
 | [<img alt="Deploy on Heroku" src="https://www.herokucdn.com/deploy/button.svg" height="40">](https://heroku.com/deploy?template=https://github.com/docusealco/docuseal-heroku) | [<img alt="Deploy on Railway" src="https://railway.app/button.svg" height="40">](https://railway.com/deploy/IGoDnc?referralCode=ruU7JR)|

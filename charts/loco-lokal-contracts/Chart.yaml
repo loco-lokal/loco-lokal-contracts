@@ -1,0 +1,5 @@
+apiVersion: v2
+name: loco-lokal-contracts
+description: Loco Lokal contracts and document signing with DocuSeal
+type: application
+version: 0.1.0
