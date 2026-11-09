@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO submitter_versions (submitter_id, slug, email, name, phone, created_at, updated_at)\n           VALUES ($1, $2, $3, $4, $5, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a2b167e3aff866508b52f974d06177dc0276549cd9edffd5ee49e0f7f021f140"
+}

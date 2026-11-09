@@ -179,7 +179,9 @@ fn unauthenticated(state: &AppState, session: &Session, parts: &Parts) -> Respon
     }
 
     session.flash_alert(message);
-    crate::request::found("/sign_in")
+    // Devise redirects to `new_user_session_url`, an absolute URL.
+    let origin = crate::signing::actions::request_origin(state, &parts.headers);
+    crate::request::found(&format!("{origin}/sign_in"))
 }
 
 fn wants_json(headers: &HeaderMap) -> bool {

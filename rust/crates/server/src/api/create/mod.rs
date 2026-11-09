@@ -108,7 +108,7 @@ fn str_of<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 /// `Templates.build_default_expire_at`.
-fn default_expire_at(template: &Template) -> Option<NaiveDateTime> {
+pub(crate) fn default_expire_at(template: &Template) -> Option<NaiveDateTime> {
     let prefs = &template.preferences;
     let duration = present_str(prefs.get("default_expire_at_duration"))?;
     let now = Utc::now().naive_utc();

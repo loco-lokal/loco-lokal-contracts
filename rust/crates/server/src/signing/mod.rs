@@ -6,9 +6,12 @@
 pub mod actions;
 pub mod audit;
 pub mod completion;
+pub mod downloads;
 pub mod emails;
 pub mod pages;
 pub mod results;
+pub mod send_email;
+pub mod start_form;
 pub mod submit;
 
 use axum::{
@@ -40,7 +43,24 @@ pub fn router() -> Router<AppState> {
         .route("/s/{slug}/decline", post(actions::decline))
         .route("/s/{slug}/values", get(actions::values))
         .route("/s/{slug}/upload", post(actions::upload))
+        .route("/s/{slug}/delegate", post(actions::delegate))
+        .route("/s/{slug}/delegated", get(pages::delegated))
+        .route("/s/{slug}/download", get(downloads::partial))
+        .route("/s/{slug}/documents", get(downloads::completed))
+        .route("/submitters/{key}/download", get(downloads::submitter))
         .route("/success", get(pages::success))
+        .route(
+            "/d/{slug}",
+            get(start_form::show)
+                .put(start_form::update)
+                .patch(start_form::update),
+        )
+        .route("/d/{slug}/completed", get(start_form::completed))
+        .route("/send_submission_email", post(send_email::create))
+        .route(
+            "/resubmit_form",
+            axum::routing::put(start_form::resubmit).patch(start_form::resubmit),
+        )
 }
 
 /// `AccountConfig` keys read by the form (`Submitters::FormConfigs::DEFAULT_KEYS`).
@@ -353,8 +373,8 @@ fn two_factor_token(headers: &HeaderMap, params: &Value) -> Option<String> {
         })
 }
 
-/// `Submitters::AuthorizedForForm`. The `email_2fa_slug` cookie is not read yet: a
-/// verified email two-factor token is the only way through.
+/// `Submitters::AuthorizedForForm`: the `email_2fa_slug` cookie or a verified email
+/// two-factor token passes email two-factor verification.
 pub struct Access<'a> {
     pub state: &'a AppState,
     pub headers: &'a HeaderMap,
@@ -381,7 +401,11 @@ impl Access<'_> {
     pub fn pass_email_2fa(&self, form: &Form) -> bool {
         let required = form.template_preference("require_email_2fa") == Some(&Value::Bool(true))
             || form.submitter.preferences.get("require_email_2fa") == Some(&Value::Bool(true));
-        !required || self.verified_token(&form.submitter.slug)
+        !required
+            || crate::cookies::encrypted(self.state, self.headers, start_form::EMAIL_2FA_COOKIE)
+                .as_deref()
+                == Some(form.submitter.slug.as_str())
+            || self.verified_token(&form.submitter.slug)
     }
 
     /// `pass_link_2fa?`.

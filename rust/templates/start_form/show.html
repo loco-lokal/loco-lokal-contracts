@@ -1,0 +1,68 @@
+{#- Port of app/views/start_form/show.html.erb. Field errors (`field_error_proc`) are not
+    ported: a start without the required details is rejected before rendering. -#}
+{% extends "layouts/form.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="agency-invitation max-w-md mx-auto mb-4">
+  <div class="space-y-6 mx-auto">
+    <div class="space-y-6">
+      <div class="text-center w-full space-y-6">
+        {% include "start_form/_banner.html" %}
+        {% if not template_archived %}
+          <p class="text-xl font-semibold text-center">{{ t('you_have_been_invited_to_submit_a_form') }}</p>
+        {% endif %}
+      </div>
+      <div class="flex items-center bg-base-200 rounded-xl p-4 mb-4">
+        <div class="flex items-center">
+          <div class="mr-3">
+            {{ svg_icon('writing_sign', class='w-10 h-10') }}
+          </div>
+          <div>
+            <p class="text-lg font-bold mb-1">{{ template_name }}</p>
+            {% if template_archived %}
+              <p dir="auto" class="text-sm">{{ t('form_has_been_deleted_by_html', name=account_name) }}</p>
+            {% else %}
+              <p dir="auto" class="text-sm">{{ t('invited_by_html', name=account_name) }}</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if not template_archived and not account_archived %}
+      <form data-turbo-frame="_top" class="space-y-4" id="new_submitter" action="{{ form_action }}" accept-charset="UTF-8" method="post"><input type="hidden" name="_method" value="put" /><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+        {% if resubmit_slug %}<input type="hidden" name="resubmit" id="resubmit" value="{{ resubmit_slug }}" />{% endif %}
+        {% if error_message %}
+          <div class="alert items-start bg-base-100 border border-red-400 text-red-400">
+            {{ svg_icon('info_circle', class='stroke-current shrink-0 h-6 w-6 mt-1') }}
+            <div class="text-sm">{{ error_message }}</div>
+          </div>
+        {% endif %}
+        {% if 'name' in link_form_fields %}
+          <div dir="auto" class="form-control !mt-0">
+            <label class="label" for="submitter_name">{{ t('name') }}</label>
+            <input {% if name_value is not none %}value="{{ name_value }}" {% endif %}required="required" class="base-input" placeholder="{{ t('provide_your_name' if multiple_fields else 'provide_your_name_to_start') }}" type="text" name="submitter[name]" id="submitter_name" />
+          </div>
+        {% endif %}
+        {% if 'email' in link_form_fields %}
+          <div dir="auto" class="form-control !mt-0">
+            <label class="label" for="submitter_email">{{ t('email') }}</label>
+            <input {% if email_value is not none %}value="{{ email_value }}" {% endif %}required="required" class="base-input" placeholder="{{ t('provide_your_email' if multiple_fields else 'provide_your_email_to_start') }}" type="email" name="submitter[email]" id="submitter_email" />
+          </div>
+        {% endif %}
+        {% if 'phone' in link_form_fields %}
+          <div dir="auto" class="form-control !mt-0">
+            <label class="label" for="submitter_phone">{{ t('phone') }}</label>
+            <input {% if phone_value is not none %}value="{{ phone_value }}" {% endif %}pattern="^\+[0-9\s\-]+$" required="required" title="{{ t('use_international_format_1xxx_') }}" class="base-input w-full" placeholder="{{ t('provide_your_phone_in_international_format' if multiple_fields else 'provide_your_phone_in_international_format_to_start') }}" type="tel" name="submitter[phone]" id="submitter_phone" />
+          </div>
+        {% endif %}
+        <toggle-submit dir="auto" class="form-control">
+          <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('start'), disabled_with=t('starting')) }}
+</button>
+        </toggle-submit>
+</form>{% endif %}  </div>
+  <div class="mt-4">
+    {% include "shared/_attribution.html" %}
+    {% include "start_form/_policy.html" %}
+  </div>
+</div>
+{% endblock %}

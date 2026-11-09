@@ -101,8 +101,22 @@ pub fn url_for(
     expires_at: Option<DateTime<Utc>>,
 ) -> String {
     format!(
-        "{}/file/{}/{}",
+        "{}{}",
         state.default_url(),
+        path_for(state, blob_uuid, filename, expires_at)
+    )
+}
+
+/// `ActiveStorage::Blob.proxy_path(blob, expires_at:, filename:)`.
+#[must_use]
+pub fn path_for(
+    state: &AppState,
+    blob_uuid: &str,
+    filename: &str,
+    expires_at: Option<DateTime<Utc>>,
+) -> String {
+    format!(
+        "/file/{}/{}",
         signed_uuid(state, blob_uuid, expires_at),
         utf8_percent_encode(filename, PATH)
     )

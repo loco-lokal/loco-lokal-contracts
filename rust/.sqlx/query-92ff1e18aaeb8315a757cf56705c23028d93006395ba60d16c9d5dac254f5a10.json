@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT event_timestamp FROM submission_events\n           WHERE submitter_id = $1 AND event_type = $2\n           ORDER BY event_timestamp DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_timestamp",
+        "type_info": "Timestamp",
+        "origin": {
+          "Table": {
+            "table": "submission_events",
+            "name": "event_timestamp"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "92ff1e18aaeb8315a757cf56705c23028d93006395ba60d16c9d5dac254f5a10"
+}

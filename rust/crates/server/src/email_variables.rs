@@ -162,6 +162,25 @@ pub struct Vars {
     submitters: Vec<Submitter>,
     /// Signed blob URLs of the recipients' attachments by `(submitter id, attachment uuid)`.
     attachment_urls: Option<HashMap<(i64, String), String>>,
+    /// `sig:`: a signed download id added to the documents links.
+    pub sig: Option<String>,
+}
+
+/// `submissions_preview_url(slug, sig:)`.
+#[must_use]
+pub fn preview_url(origin: &str, slug: &str, sig: Option<&str>) -> String {
+    const COMPONENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'*')
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_');
+    match sig {
+        Some(sig) => format!(
+            "{origin}/e/{slug}?sig={}",
+            percent_encoding::utf8_percent_encode(sig, COMPONENT)
+        ),
+        None => format!("{origin}/e/{slug}"),
+    }
 }
 
 impl Vars {
@@ -190,6 +209,7 @@ impl Vars {
             created_by,
             submitters,
             attachment_urls: None,
+            sig: None,
         }))
     }
 
@@ -426,10 +446,10 @@ impl Vars {
         });
         text = sub(&text, &SUBMITTERS, |_| Some(self.submitters_list()));
         let documents = |_: &Captures<'_>| {
-            Some(format!(
-                "{}/e/{}",
-                email_host_origin(state),
-                submission.slug
+            Some(preview_url(
+                &email_host_origin(state),
+                &submission.slug,
+                self.sig.as_deref(),
             ))
         };
         text = sub(&text, &DOCUMENTS_LINKS, documents);

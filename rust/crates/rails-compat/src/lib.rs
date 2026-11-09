@@ -5,11 +5,13 @@
 //! - `message_verifier`: `ActiveSupport::MessageVerifier` (signed ids and blob ids)
 //! - `password`: Devise bcrypt password hashes
 //! - `devise`: reset-token digests, friendly tokens, and TOTP codes
+//! - `cookies`: `cookies.encrypted` values (`ActiveSupport::MessageEncryptor`)
 //! - `csrf`: masked per-session authenticity tokens, as `form_authenticity_token` produces
 //!
 //! [`RailsSecrets`] derives every key from `SECRET_KEY_BASE` / `ENCRYPTION_SECRET` the way
 //! `config/environments/production.rb` and the Rails railties do.
 
+pub mod cookies;
 pub mod csrf;
 pub mod devise;
 pub mod encryption;
@@ -17,6 +19,7 @@ pub mod key_generator;
 pub mod message_verifier;
 pub mod password;
 
+use cookies::CookieEncryptor;
 use encryption::Encryptor;
 use key_generator::{Digest, KeyGenerator};
 use message_verifier::MessageVerifier;
@@ -35,6 +38,8 @@ pub struct RailsSecrets {
     pub signed_id_verifier: MessageVerifier,
     /// `ActiveStorage.verifier` (`ActiveStorage::Blob.find_signed`).
     pub active_storage_verifier: MessageVerifier,
+    /// `cookies.encrypted`.
+    pub cookie_encryptor: CookieEncryptor,
 }
 
 impl RailsSecrets {
@@ -64,6 +69,9 @@ impl RailsSecrets {
                 app_keys.generate_key(b"ActiveStorage", 64),
                 Digest::Sha1,
                 false,
+            ),
+            cookie_encryptor: CookieEncryptor::new(
+                &app_keys.generate_key(b"authenticated encrypted cookie", 32),
             ),
         }
     }

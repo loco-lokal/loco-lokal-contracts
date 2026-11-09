@@ -8,19 +8,19 @@
     "values": {
       "short": {
         "plaintext": "https://example.com/webhook",
-        "ciphertext": "{\"p\":\"WtjnGkeDP6GUROsGV2RPVGQ6AEwbZ5Fld81v\",\"h\":{\"iv\":\"HHNBsLEqqPKzeMx6\",\"at\":\"LEa3IhF/tNSfYTgYhF9CVw==\"}}"
+        "ciphertext": "{\"p\":\"2SrqOSQgy9W+ldL2Xbhow9Bx0435ln0GP3OX\",\"h\":{\"iv\":\"FI9u8rkF7Uck8TP1\",\"at\":\"xLpXdtqSuUAt5AIX8Vcyfg==\"}}"
       },
       "empty": {
         "plaintext": "",
-        "ciphertext": "{\"p\":\"\",\"h\":{\"iv\":\"78+AqfiT14uDfMvl\",\"at\":\"w46/a/C/Q9YDQjyHD7HCxQ==\"}}"
+        "ciphertext": "{\"p\":\"\",\"h\":{\"iv\":\"RkZ8l+9iZz6j9C3j\",\"at\":\"TZmAkuie8CmdJWErLfYxCQ==\"}}"
       },
       "unicode": {
         "plaintext": "Grüße – 署名 ✍️",
-        "ciphertext": "{\"p\":\"90rw/XRD/U7IGbQ83OshHhg9xRVD7IDOvw==\",\"h\":{\"iv\":\"jhHUD/lbwgpDnvwB\",\"at\":\"6QBzYiOwIq9MDXPvzSpK9g==\"}}"
+        "ciphertext": "{\"p\":\"B2+54daq2ZpG98WnzYKfJmC9ZmeGxcCkfQ==\",\"h\":{\"iv\":\"TsxmRndes3apsP1Z\",\"at\":\"cDF1a79Px2AhybDGUjJQcg==\"}}"
       },
       "long": {
         "plaintext": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Lorem ipsum dolor sit amet, consectetur adipiscing elit. ",
-        "ciphertext": "{\"p\":\"DmafIDoIu0PyEouY3AIHzA8r81AMifGi3sjbTVj97sSr2OQ4WQSvHdAsamyhF7NAbIqRrlgnB01CGU25/d2vIIaM6THh\",\"h\":{\"iv\":\"A2Dtcw96hNm8gjxy\",\"at\":\"GqhYomIwHpTzElCBuTk4hQ==\",\"c\":true}}"
+        "ciphertext": "{\"p\":\"dODDG+ozwF45LT8JuCP00bbEtAjCsnv8k7S+jZd0P5+8mfSpS0O7jib6rLOikM9FTSpDApXLtox0nH1Town1qkx72s8e\",\"h\":{\"iv\":\"/OWI3VS1RHAETmGM\",\"at\":\"cKARSyYazz5fR2XfzsN2eQ==\",\"c\":true}}"
       }
     }
   },
@@ -30,12 +30,12 @@
       "submitter_download_completed": {
         "data": 42,
         "purpose": "submitter/download_completed",
-        "message": "eyJfcmFpbHMiOnsiZGF0YSI6NDIsImV4cCI6IjIxMjYtMTEtMDZUMjM6NTU6MzQuNzc5WiIsInB1ciI6InN1Ym1pdHRlci9kb3dubG9hZF9jb21wbGV0ZWQifX0--b7945c5cb6a10a8ee3c95530d221b0711a6b6454e2136aa317946b8cd1d929e1"
+        "message": "eyJfcmFpbHMiOnsiZGF0YSI6NDIsImV4cCI6IjIxMjYtMTEtMDlUMDg6NDU6NDQuMDIxWiIsInB1ciI6InN1Ym1pdHRlci9kb3dubG9hZF9jb21wbGV0ZWQifX0--7178e1d41a9af38b69651407edbf40b07f0158b8c97fa483f1883b71b956a044"
       },
       "attachment_uuid": {
         "data": "b1c2d3e4-0000-4000-8000-000000000001",
         "purpose": "attachment",
-        "message": "eyJfcmFpbHMiOnsiZGF0YSI6ImIxYzJkM2U0LTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImV4cCI6IjIxMjYtMTEtMDZUMjM6NTU6MzQuNzgwWiIsInB1ciI6ImF0dGFjaG1lbnQifX0--5b1964258cfa77a6c673eae36a2d74dcd945a1658b4ae2be3187459fdc9cacc8"
+        "message": "eyJfcmFpbHMiOnsiZGF0YSI6ImIxYzJkM2U0LTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsImV4cCI6IjIxMjYtMTEtMDlUMDg6NDU6NDQuMDIxWiIsInB1ciI6ImF0dGFjaG1lbnQifX0--b1948be100b7ce0f8b55ff2efba66a5c6067b821f6612a736211a34bd75fb6f2"
       },
       "attachment_pair": {
         "data": [
@@ -43,7 +43,7 @@
           "b1c2d3e4-0000-4000-8000-000000000001"
         ],
         "purpose": "attachment",
-        "message": "eyJfcmFpbHMiOnsiZGF0YSI6WzcsImIxYzJkM2U0LTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSJdLCJleHAiOiIyMTI2LTExLTA2VDIzOjU1OjM0Ljc4MFoiLCJwdXIiOiJhdHRhY2htZW50In19--e806963b0ab56a0efb8082967d33fb90001f0abc87e9c7f5f77cf303fab6ff1e"
+        "message": "eyJfcmFpbHMiOnsiZGF0YSI6WzcsImIxYzJkM2U0LTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSJdLCJleHAiOiIyMTI2LTExLTA5VDA4OjQ1OjQ0LjAyMVoiLCJwdXIiOiJhdHRhY2htZW50In19--391fd6c6d735910b147d33e5762f06746011f5f2dd7b77c5e0f313a4a43b1d98"
       },
       "blob_proxy_no_purpose": {
         "data": [
@@ -77,7 +77,17 @@
       "password": "smtp-secret",
       "from_email": "contracts@example.test"
     },
-    "stored": "{\"p\":\"7KL8u31IJ03tyWupP8TbfMrUtZTNO/M1f1S0a9wRNT0cHy2HBiKAU5b9NiZHZFu2u3Wl6LtJB4kJ7SSonjiAgXPzfTOpaFsVAq0PP3iYGQbAeagMEJtefInc5YiMlLmV55Hea3W6Ho3f5ZBrGQkIpX6/8udxlpoMNB5xO22BKg==\",\"h\":{\"iv\":\"AdZfzO4YtceUVhyS\",\"at\":\"dS5dTfFhqTp9T9tw2ocSBg==\"}}"
+    "stored": "{\"p\":\"oCyS+gQ4IaWshSJeOKRfmAGUbMAQeFqnmeAOBGtw2HFDtWOG7TyRh6lBFn7qh4H1LLVDCgLbICZ641GQZzascfEJ0u2CanUg0R+CmbbkWU/NvwW+rI19xn+v7dBS47MANCNenGkEovXEbrcbG9sOwAcmGJdtq0pjPwfHf2d9PA==\",\"h\":{\"iv\":\"umaE/ncJqsp253Uh\",\"at\":\"YTHKgHJa4Oo0D19q2a0gpA==\"}}"
+  },
+  "encrypted_cookies": {
+    "start_form_slug": {
+      "value": "abc123XYZ",
+      "cookie": "CcZrwTlu7w9I8Hne6/BqhvuAgJXXtFu6ihxxrF8DbOqrkz3VJVJZeirUluu3KR/W7tVfvm6w1x+4kBeXpeCc54u8IoCOBN64k3vAJOkzdwBuW4C+xkYS7S3SnYzeGGRXvNCz2vVJYfmF--vf4rGFMkJQRfLhXb--pTNXMN/jd2jAp2pvLbdPIw=="
+    },
+    "email_2fa_slug": {
+      "value": "no-expiry",
+      "cookie": "2oJ2UanTdlkQjvF85MGHBR6oqHftAkP3KiYE21IDKGrBkZkL4B2cZEcrsxBAJEAp2lP3aB9c5urKx3q29MCKAo1bEX+KckTvRKYewE3+QcF99g==--xWY2LDewhzzBGPY5--xWV4SShEUuPYUkWDHfggfw=="
+    }
   },
   "devise": {
     "reset_password_token": {
@@ -96,7 +106,7 @@
   },
   "bcrypt": {
     "password": "correct horse battery staple",
-    "hash": "$2a$10$m1sgJU6Y01Iybrg3fA2T1er9GZ5iS3D5F9YVAxin0rHeVr2CraJVi",
+    "hash": "$2a$10$/qMWI2Pmeub5E.g/P7xNp.kKJzGEFXqw2MpE6oT0weTmqhCMMNVlG",
     "pepper": null
   }
 }

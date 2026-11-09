@@ -59,12 +59,15 @@ impl Job for SendCompleted {
     }
 }
 
-/// `SubmitterMailer.documents_copy_email(submitter, to:).deliver_later!`.
+/// `SubmitterMailer.documents_copy_email(submitter, to:, sig:).deliver_later!`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SendDocumentsCopy {
     pub submitter_id: i64,
     #[serde(default)]
     pub to: Option<String>,
+    /// Adds a signed download id to the preview links (`/send_submission_email`).
+    #[serde(default)]
+    pub sig: bool,
 }
 
 impl Job for SendDocumentsCopy {
@@ -187,6 +190,7 @@ pub async fn enqueue_completed_emails(state: &AppState, form: &Form) -> Result<(
                         &SendDocumentsCopy {
                             submitter_id: submitter.id,
                             to: Some(to),
+                            sig: false,
                         },
                     )
                     .await?;
@@ -197,6 +201,7 @@ pub async fn enqueue_completed_emails(state: &AppState, form: &Form) -> Result<(
                     &SendDocumentsCopy {
                         submitter_id: submitter.id,
                         to: Some(to.join(", ")),
+                        sig: false,
                     },
                 )
                 .await?;
@@ -349,9 +354,27 @@ async fn send_completed(state: &AppState, job: &SendCompleted) -> Result<(), App
     .await
 }
 
-/// `SubmitterMailer#documents_copy_email` (without `sig`).
+/// `SubmitterMailer::SIGN_TTL`.
+const SIGN_TTL: chrono::Duration = chrono::Duration::minutes(80);
+
+/// `submitter.signed_id(expires_in: SIGN_TTL, purpose: :download_completed)`.
+#[must_use]
+pub fn download_sig(state: &AppState, submitter_id: i64) -> String {
+    state.secrets.signed_id_verifier.generate(
+        &json!(submitter_id),
+        Some(&loco_rails_compat::signed_id_purpose(
+            "submitter",
+            Some("download_completed"),
+        )),
+        Some(chrono::Utc::now() + SIGN_TTL),
+    )
+}
+
+/// `SubmitterMailer#documents_copy_email`.
 async fn send_documents_copy(state: &AppState, job: &SendDocumentsCopy) -> Result<(), AppError> {
     let mut vars = load_vars(state, job.submitter_id).await?;
+    let sig = job.sig.then(|| download_sig(state, job.submitter_id));
+    vars.sig.clone_from(&sig);
     let preferences = template_preferences(&vars);
     let config = loco_db::submissions::account_config_with_fallback(
         &state.db,
@@ -393,7 +416,11 @@ async fn send_documents_copy(state: &AppState, job: &SendDocumentsCopy) -> Resul
             "product_name": PRODUCT_NAME,
             "custom_body": custom_body,
             "name": vars.submission_name(),
-            "preview_url": format!("{}/e/{}", email_origin(state), vars.submission.slug),
+            "preview_url": crate::email_variables::preview_url(
+                &email_origin(state),
+                &vars.submission.slug,
+                sig.as_deref(),
+            ),
             "account_name": vars.account.name,
         }),
     )?);
@@ -447,6 +474,22 @@ async fn deliver(
     Ok(())
 }
 
+/// The account's `document_filename_format`, when present.
+pub(super) async fn filename_format(
+    state: &AppState,
+    account_id: i64,
+) -> Result<Option<String>, AppError> {
+    Ok(
+        signing::account_configs(&state.db, account_id, &[DOCUMENT_FILENAME_FORMAT_KEY])
+            .await?
+            .into_iter()
+            .next()
+            .map(|(_, v)| v)
+            .filter(|v| present(Some(v)).is_some())
+            .map(|v| crate::api::create::values::ruby_to_s(&v)),
+    )
+}
+
 /// `add_completed_email_attachments!(submitter, with_audit_log:, with_documents:)`: the
 /// result documents, the audit trail, and the uploaded files when one party has file
 /// fields, while the total stays under `MAX_ATTACHMENTS_SIZE`.
@@ -461,17 +504,7 @@ async fn completed_attachments(
     } else {
         Vec::new()
     };
-    let filename_format = signing::account_configs(
-        &state.db,
-        vars.submitter.account_id,
-        &[DOCUMENT_FILENAME_FORMAT_KEY],
-    )
-    .await?
-    .into_iter()
-    .next()
-    .map(|(_, v)| v)
-    .filter(|v| present(Some(v)).is_some())
-    .map(|v| crate::api::create::values::ruby_to_s(&v));
+    let filename_format = filename_format(state, vars.submitter.account_id).await?;
 
     let mut out = Vec::new();
     let mut total_size = 0;
@@ -623,7 +656,7 @@ fn split_filename(filename: &str) -> (&str, &str) {
 }
 
 /// `Submitters.build_document_filename(submitter, blob, filename_format)`.
-async fn document_filename(
+pub(super) async fn document_filename(
     state: &AppState,
     vars: &mut Vars,
     blob: &Blob,

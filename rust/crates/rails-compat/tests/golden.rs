@@ -194,3 +194,25 @@ fn matches_rotp_codes_and_provisioning_uri() {
         s(&case["provisioning_uri"])
     );
 }
+
+#[test]
+fn reads_and_writes_rails_encrypted_cookies() {
+    let cookies = &GOLDEN["encrypted_cookies"];
+    let encryptor = &SECRETS.cookie_encryptor;
+    for name in ["start_form_slug", "email_2fa_slug"] {
+        let golden = &cookies[name];
+        assert_eq!(
+            encryptor.decrypt(name, s(&golden["cookie"])),
+            Some(golden["value"].clone())
+        );
+        // The purpose is bound to the cookie name.
+        assert_eq!(encryptor.decrypt("other", s(&golden["cookie"])), None);
+    }
+    let exp = Utc.with_ymd_and_hms(2126, 1, 1, 0, 0, 0).unwrap();
+    let written = encryptor.encrypt("start_form_slug", &json!("slug"), Some(exp));
+    assert_eq!(
+        encryptor.decrypt("start_form_slug", &written),
+        Some(json!("slug"))
+    );
+    assert_eq!(encryptor.decrypt_at("start_form_slug", &written, exp), None);
+}

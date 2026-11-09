@@ -388,3 +388,138 @@ pub async fn upload(
         &blob,
     )))
 }
+
+/// `Submitters.fetch_values_for_delegate`: the values without the party's signatures,
+/// phone, verification and initials (unless they are defaults).
+fn values_for_delegate(form: &Form) -> Map<String, Value> {
+    let default_values = form
+        .submitter
+        .preferences
+        .get("default_values")
+        .and_then(Value::as_object);
+    let drop: Vec<&str> = form
+        .fields()
+        .iter()
+        .filter(|f| {
+            f.get("submitter_uuid").and_then(Value::as_str) == Some(form.submitter.uuid.as_str())
+        })
+        .filter(|f| {
+            matches!(
+                f.get("type").and_then(Value::as_str),
+                Some("signature" | "phone" | "verification" | "kba" | "initials")
+            )
+        })
+        .filter_map(|f| f.get("uuid").and_then(Value::as_str))
+        .filter(|uuid| {
+            !default_values
+                .and_then(|d| d.get(*uuid))
+                .is_some_and(|v| loco_domain::submit::present(Some(v)))
+        })
+        .collect();
+    form.submitter
+        .values
+        .as_object()
+        .map(|values| {
+            values
+                .iter()
+                .filter(|(k, _)| !drop.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `POST /s/:slug/delegate`.
+pub async fn delegate(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    MaybeAuth(auth): MaybeAuth,
+    ClientIp(ip): ClientIp,
+    session: Session,
+    headers: HeaderMap,
+    params: Params,
+) -> Result<Response, AppError> {
+    let Some(form) = Form::load(&state, &slug).await? else {
+        return Err(not_found());
+    };
+    let back = redirect_to(&state, &headers, &format!("/s/{}", form.submitter.slug));
+    let access = Access {
+        state: &state,
+        headers: &headers,
+        params: &params.0,
+        current_user: auth.as_ref().map(|a| &a.user),
+    };
+    if form.submitter.declined_at.is_some()
+        || form.submitter.completed_at.is_some()
+        || form.submission.archived_at.is_some()
+        || form.expired()
+        || form.template_archived()
+        || form.viewer()
+        || !access.authorized(&form)
+        || !access.pass_submitters_order(&form).await?
+    {
+        return Ok(back);
+    }
+    // `account_configs.find_by!(key: ALLOW_TO_DELEGATE_KEY, value: true)`
+    let allowed = signing::account_configs(&state.db, form.account.id, &[keys::ALLOW_TO_DELEGATE])
+        .await?
+        .iter()
+        .any(|(_, v)| *v == Value::Bool(true));
+    if !allowed {
+        return Err(not_found());
+    }
+    let Some(email) = params
+        .get("email")
+        .map(crate::api::create::values::ruby_to_s)
+        .and_then(|e| crate::api::create::email::normalize_email(&e))
+    else {
+        return Ok(back);
+    };
+
+    let old_slug = form.submitter.slug.clone();
+    let mut extra = Map::new();
+    extra.insert(
+        "old_email".into(),
+        form.submitter
+            .email
+            .clone()
+            .map_or(Value::Null, Value::String),
+    );
+    extra.insert("email".into(), Value::String(email.clone()));
+    let user_agent = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok());
+    let data = crate::api::submitters::tracking_data(
+        ip.as_deref(),
+        user_agent,
+        Some(&session.public_id()),
+        auth.as_ref().map(|a| a.true_user.id),
+        extra,
+    );
+    let values = values_for_delegate(&form);
+    let mut tx = state.db.begin().await?;
+    signing::insert_submitter_version(&mut *tx, &form.submitter).await?;
+    submissions::insert_event(
+        &mut *tx,
+        &form.submitter,
+        "delegate_form",
+        &JsonText(Value::Object(data)),
+    )
+    .await?;
+    signing::delegate(
+        &mut *tx,
+        form.submitter.id,
+        &email,
+        &loco_rails_compat::base58(14),
+        &JsonText(Value::Object(values)),
+    )
+    .await?;
+    tx.commit().await?;
+
+    crate::mail::invitation_later(&state, form.submitter.id).await;
+    Ok(redirect_to(
+        &state,
+        &headers,
+        &format!("/s/{old_slug}/delegated"),
+    ))
+}

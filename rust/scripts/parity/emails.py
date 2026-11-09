@@ -12,6 +12,7 @@ Mailpit's inbox is cleared before each case; created submissions are deleted.
 """
 
 import json
+import subprocess
 import os
 import re
 import sys
@@ -23,7 +24,7 @@ from create import rows
 from writes import call, check
 
 MAILPIT = os.environ.get("MAILPIT_URL", "http://127.0.0.1:8025")
-LINK = re.compile(r"/(s|e)/[A-Za-z0-9]+(\?t=[A-Za-z0-9_-]+)?")
+LINK = re.compile(r"/(s|e)/[A-Za-z0-9]+(\?(?:t|sig)=[A-Za-z0-9_%-]+)?")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 IDS = re.compile(r"/submissions/\d+")
 
@@ -36,7 +37,7 @@ def mailpit(method, path):
 
 
 def normalize(text, collapse=True):
-    text = LINK.sub(lambda m: f"/{m[1]}/SLUG" + ("?t=T" if m[2] else ""), text or "")
+    text = LINK.sub(lambda m: f"/{m[1]}/SLUG" + (m[2][:m[2].index("=") + 1] + "T" if m[2] else ""), text or "")
     text = IDS.sub("/submissions/ID", UUID.sub("UUID", text))
     return re.sub(r"\s+", " ", text).strip() if collapse else text
 
@@ -231,8 +232,73 @@ def main():
         "submitters": [first, {**second, "name": "Bob Stone"}]},
         complete_all, expected=4)
 
+    def send_copy(base, created):
+        complete_all(base, created)
+        messages(2)  # the completed emails
+        mailpit("DELETE", "/api/v1/messages")
+        browser = Browser(base)
+        status = browser.request("POST", "/send_submission_email",
+                                 [("submitter_slug", created[0]["slug"])])[0]
+        assert status == 200, status
+        messages(0)
+        # A copy was just sent with the completed emails, so this one is skipped
+        # (`can_send?`); without that record a copy with a signed link goes out.
+        db = os.environ.get("DATABASE_URL", "postgres://docuseal:docuseal_dev@127.0.0.1:5435/docuseal")
+        subprocess.run(["psql", db, "-qtAc",
+                        "DELETE FROM email_events WHERE tag = 'submitter_documents_copy' "
+                        f"AND emailable_type = 'Submitter' AND emailable_id = {created[0]['id']}"],
+                       check=True)
+        status = browser.request("POST", "/send_submission_email",
+                                 [("submitter_slug", created[0]["slug"])])[0]
+        assert status == 200, status
+    signing_case(token, "documents copy from send_submission_email", {
+        "template_id": t, "expected_invitations": 1, "submitters": [first]},
+        send_copy, expected=1)
+
+    pages = {}
+    db = os.environ.get("DATABASE_URL", "postgres://docuseal:docuseal_dev@127.0.0.1:5435/docuseal")
+
+    def delegate(base, created):
+        browser = Browser(base)
+        slug = created[0]["slug"]
+        browser.request("GET", f"/s/{slug}")
+        denied = browser.request("POST", f"/s/{slug}/delegate",
+                                 [("authenticity_token", browser.csrf), ("email", "carol@example.com")])
+        subprocess.run(["psql", db, "-qtAc",
+                        "INSERT INTO account_configs (account_id, key, value, created_at, updated_at) "
+                        f"VALUES ({created_account(created)}, 'allow_to_delegate', 'true', now(), now()) "
+                        "ON CONFLICT (account_id, key) DO UPDATE SET value = 'true'"], check=True)
+        try:
+            blank = browser.request("POST", f"/s/{slug}/delegate",
+                                    [("authenticity_token", browser.csrf), ("email", "")])
+            done = browser.request("POST", f"/s/{slug}/delegate",
+                                   [("authenticity_token", browser.csrf), ("email", "Carol@Example.com")])
+        finally:
+            subprocess.run(["psql", db, "-qtAc",
+                            "DELETE FROM account_configs WHERE key = 'allow_to_delegate'"], check=True)
+        pages[base] = {
+            "delegate without the setting": denied,
+            "delegate with a blank email": blank,
+            "delegate": done,
+            "delegated page": browser.request("GET", f"/s/{slug}/delegated"),
+            "old slug": browser.request("GET", f"/s/{slug}"),
+        }
+    signing_case(token, "invitation after delegating", {
+        "template_id": t, "send_email": False, "submitters": [first, second]}, delegate, expected=1)
+    from signing import check as page_check, page
+    for label in pages[RAILS]:
+        page_check(f"  {label}", pages[RAILS][label], pages[RUST][label], page)
+
+    import signing
     from writes import FAILURES
-    sys.exit(1 if FAILURES else 0)
+    sys.exit(1 if FAILURES or signing.FAILURES else 0)
+
+
+def created_account(created):
+    db = os.environ.get("DATABASE_URL", "postgres://docuseal:docuseal_dev@127.0.0.1:5435/docuseal")
+    out = subprocess.run(["psql", db, "-tAc", f"SELECT account_id FROM submitters WHERE id = {created[0]['id']}"],
+                         capture_output=True, text=True, check=True).stdout
+    return int(out.strip())
 
 
 if __name__ == "__main__":

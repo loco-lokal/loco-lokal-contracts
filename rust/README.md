@@ -113,8 +113,10 @@ cd rust/scripts/parity
 ./writes.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # template clone/update/archive, submission update/archive
 ./create.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # submission create modes and errors, submitter updates; compares stored rows
 ./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs, audit trail
-./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined, next-party and completed emails via Mailpit, email_events rows
+./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined, next-party, completed, delegation and copy emails via Mailpit, email_events rows
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
+./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
+./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
 ```
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
@@ -151,6 +153,17 @@ Phase 4c adds the audit trail and the completed emails:
 
 `signing.py` compares the audit trails word by word (positions to 0.01 pt; ids, checksums and addresses may differ in text only), as rendered pages, by metadata and by signature. Saved documents carry HexaPDF's `Producer` and its zone-less UTC dates, as the Rails documents do.
 
+The rest of Phase 4 adds the links around the signing form:
+
+- `signing/downloads.rs`: `/s/:slug/download` (documents signed so far), `/s/:slug/documents` and `/submitters/:slug/download` (with the `sig` link of documents copy emails), and `/submitters/:id/download` for signed-in users. Links are `/file/…` blob proxy paths with `document_filename_format` applied.
+- `signing/start_form.rs`: the share link `/d/:slug` (start, reopen with the `start_form_slug` cookie, the private and completed pages) and resubmitting from the completed pages (`/resubmit_form`). New submissions get the defined and linked parties and the `submission.created` webhook.
+- `signing/send_email.rs`: `/send_submission_email`, a documents copy email with a signed download link, once per 30 minutes.
+- Delegating (`/s/:slug/delegate`), with the `submitter_versions` row, the invitation to the new email, and the `/s/:slug/delegated` page.
+- `loco_rails_compat::cookies` reads and writes Rails' `cookies.encrypted` values, so the `start_form_slug` and `email_2fa_slug` cookies work across both servers. Like Rails, the Rust server does not write these secure cookies on plain-http requests in production.
+- Devise's sign-in redirect is now an absolute URL, as in Rails.
+
+`downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -162,11 +175,12 @@ These parts return 422 ("not supported yet") or are still missing:
 - Right-to-left text is drawn in logical order, where Rails reorders it visually.
 - Form fields that need their appearances generated (`NeedAppearances`) are left unflattened.
 - Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet", as does right-to-left text in the audit trail and a timestamp server for its signature.
-- The `sig` download links of documents copy emails (only sent by `/send_submission_email`, not ported).
-- The start form `/d/:slug` and resubmitting (Phase 4).
-- Email two-factor verification on the signing form (422), and the 2FA cookie checks.
+- Email two-factor verification: sending and checking codes on the signing form and the share link (`shared_link_2fa`, reopening a pending party without the start form cookie, `?email_verification`) answers 422. A valid `email_2fa_slug` cookie or two-factor token is accepted.
+- Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission) answer 422.
+- The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
+- Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
+- The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).
 - Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
-- `/s/:slug/download`, `/s/:slug/documents`, delegation, `/send_submission_email` and `/p/:slug`. Their buttons render, but the endpoints are not ported yet.
 - The remember-signature cookie, and presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
 - Creating `completed` submitters and completing them through `PUT /api/submitters/:id`, and prefilling attachment fields.
 - Expiration jobs (Phase 7).

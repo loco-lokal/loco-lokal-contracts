@@ -1,0 +1,43 @@
+{#- Port of app/views/start_form/completed.html.erb -#}
+{% extends "layouts/form.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="max-w-md mx-auto px-2 mt-12 mb-4">
+  <div class="space-y-6 mx-auto">
+    <div class="space-y-6">
+      <div class="flex items-center justify-center">
+        {% include "start_form/_banner.html" %}
+      </div>
+      <div class="flex items-center bg-base-200 rounded-xl p-4 mb-4">
+        <div class="flex items-center">
+          <div class="mr-3">
+            {{ svg_icon('writing_sign', class='w-10 h-10') }}
+          </div>
+          <div>
+            <p dir="auto" class="text-lg font-bold mb-1">{{ template_name }}</p>
+            <p dir="auto" class="text-sm">
+              {{ signed_text }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div dir="auto" class="text-center text-2xl font-semibold">
+      {{ t('document_has_been_signed_already') if with_signature_fields else t('form_has_been_submitted_already') }}
+    </div>
+    {% if can_email %}
+      <toggle-submit class="block">
+        <form class="button_to" method="post" action="/send_submission_email"><button class="base-button w-full" type="submit">{{ buttons.button_title(title=t('send_copy_to_email'), disabled_with=t('sending'), icon=svg_icon('mail_forward', class='w-6 h-6')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />{% if email_param is not none %}<input type="hidden" name="email" value="{{ email_param }}" />{% endif %}<input type="hidden" name="template_slug" value="{{ template_slug }}" /></form>
+      </toggle-submit>
+    {% endif %}
+    {% if can_resubmit %}
+      <toggle-submit class="block">
+        <form class="button_to" method="post" action="/d/{{ template_slug }}"><input type="hidden" name="_method" value="put" /><button class="white-button w-full" type="submit">{{ buttons.button_title(title=t('resubmit'), disabled_with=t('resubmit'), icon=svg_icon('reload', class='w-6 h-6')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="resubmit" value="true" />{% for key, value in resubmit_params %}<input type="hidden" name="submitter[{{ key }}]" value="{{ value }}" />{% endfor %}</form>
+      </toggle-submit>
+    {% endif %}
+  </div>
+</div>
+{% include "shared/_attribution.html" %}
+{% endblock %}

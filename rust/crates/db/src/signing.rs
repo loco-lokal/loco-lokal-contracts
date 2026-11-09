@@ -425,3 +425,220 @@ pub async fn submitter_versions(
     .fetch_all(db)
     .await?)
 }
+
+/// `Submitters::StartForm.build_submitters_scope(template, exclude_completed:)
+/// .find_by(find_params)`: the newest open submitter of a template's active, non-expired
+/// submissions with these contact details. A `None` detail is not filtered on.
+pub async fn find_start_form_submitter(
+    db: impl PgExecutor<'_>,
+    template_id: i64,
+    email: Option<&str>,
+    phone: Option<&str>,
+    exclude_completed: bool,
+) -> Result<Option<Submitter>, DbError> {
+    Ok(sqlx::query_as!(
+        Submitter,
+        r#"SELECT r.id, r.submission_id, r.uuid, r.email, r.slug,
+                  r.values AS "values: JsonText", r.ua, r.ip, r.sent_at, r.opened_at,
+                  r.completed_at, r.created_at, r.updated_at, r.name, r.phone, r.external_id,
+                  r.preferences AS "preferences: JsonText",
+                  r.metadata AS "metadata: JsonText", r.account_id, r.declined_at,
+                  r.timezone, r.template_id
+           FROM submitters r
+           WHERE r.template_id = $1
+             AND r.submission_id IN (
+               SELECT s.id FROM submissions s
+               WHERE s.template_id = $1 AND s.archived_at IS NULL
+                 AND (s.expire_at IS NULL OR s.expire_at >= (now() AT TIME ZONE 'utc')))
+             AND r.declined_at IS NULL AND r.external_id IS NULL
+             AND ($4 = false OR r.completed_at IS NULL)
+             AND ($2::varchar IS NULL OR r.email = $2)
+             AND ($3::varchar IS NULL OR r.phone = $3)
+           ORDER BY r.id DESC LIMIT 1"#,
+        template_id,
+        email,
+        phone,
+        exclude_completed,
+    )
+    .fetch_optional(db)
+    .await?)
+}
+
+/// `StartFormResubmitController#find_or_initialize_submitter`: the open submitter with the
+/// slug of the `start_form_slug` cookie and the resubmitted party's email.
+pub async fn find_start_form_submitter_by_slug(
+    db: impl PgExecutor<'_>,
+    template_id: i64,
+    slug: Option<&str>,
+    email: Option<&str>,
+) -> Result<Option<Submitter>, DbError> {
+    Ok(sqlx::query_as!(
+        Submitter,
+        r#"SELECT r.id, r.submission_id, r.uuid, r.email, r.slug,
+                  r.values AS "values: JsonText", r.ua, r.ip, r.sent_at, r.opened_at,
+                  r.completed_at, r.created_at, r.updated_at, r.name, r.phone, r.external_id,
+                  r.preferences AS "preferences: JsonText",
+                  r.metadata AS "metadata: JsonText", r.account_id, r.declined_at,
+                  r.timezone, r.template_id
+           FROM submitters r
+           WHERE r.template_id = $1
+             AND r.submission_id IN (
+               SELECT s.id FROM submissions s
+               WHERE s.template_id = $1 AND s.archived_at IS NULL
+                 AND (s.expire_at IS NULL OR s.expire_at >= (now() AT TIME ZONE 'utc')))
+             AND r.declined_at IS NULL AND r.external_id IS NULL AND r.completed_at IS NULL
+             AND r.slug IS NOT DISTINCT FROM $2 AND r.email IS NOT DISTINCT FROM $3
+           ORDER BY r.id DESC LIMIT 1"#,
+        template_id,
+        slug,
+        email,
+    )
+    .fetch_optional(db)
+    .await?)
+}
+
+/// `StartFormController#completed`: a completed submitter of the template's submissions
+/// with these contact details (`find_by!`, unordered).
+pub async fn find_completed_start_form_submitter(
+    db: impl PgExecutor<'_>,
+    template_id: i64,
+    email: Option<&str>,
+    phone: Option<&str>,
+) -> Result<Option<Submitter>, DbError> {
+    Ok(sqlx::query_as!(
+        Submitter,
+        r#"SELECT r.id, r.submission_id, r.uuid, r.email, r.slug,
+                  r.values AS "values: JsonText", r.ua, r.ip, r.sent_at, r.opened_at,
+                  r.completed_at, r.created_at, r.updated_at, r.name, r.phone, r.external_id,
+                  r.preferences AS "preferences: JsonText",
+                  r.metadata AS "metadata: JsonText", r.account_id, r.declined_at,
+                  r.timezone, r.template_id
+           FROM submitters r
+           WHERE r.submission_id IN (SELECT s.id FROM submissions s WHERE s.template_id = $1)
+             AND r.completed_at IS NOT NULL
+             AND ($2::varchar IS NULL OR r.email = $2)
+             AND ($3::varchar IS NULL OR r.phone = $3)
+           LIMIT 1"#,
+        template_id,
+        email,
+        phone,
+    )
+    .fetch_optional(db)
+    .await?)
+}
+
+/// `submitter.assign_attributes(ip:, ua:)` and `save`: bumps `updated_at` only on a change.
+pub async fn set_submitter_request(
+    db: impl PgExecutor<'_>,
+    id: i64,
+    ip: Option<&str>,
+    ua: Option<&str>,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        r#"UPDATE submitters SET ip = $2, ua = $3,
+             updated_at = CASE WHEN (ip, ua) IS NOT DISTINCT FROM ($2::varchar, $3::varchar)
+                               THEN updated_at ELSE (now() AT TIME ZONE 'utc') END
+           WHERE id = $1"#,
+        id,
+        ip,
+        ua,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// `EmailEvent.exists?(tag:, email:, emailable:, event_type: :send, created_at: since..)`.
+pub async fn email_sent_since(
+    db: impl PgExecutor<'_>,
+    tag: &str,
+    email: &str,
+    emailable_type: &str,
+    emailable_id: i64,
+    since: NaiveDateTime,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+             SELECT 1 FROM email_events
+             WHERE tag = $1 AND email = $2 AND emailable_type = $3 AND emailable_id = $4
+               AND event_type = 'send' AND created_at >= $5
+               AND created_at <= (now() AT TIME ZONE 'utc')) AS "exists!""#,
+        tag,
+        email,
+        emailable_type,
+        emailable_id,
+        since,
+    )
+    .fetch_one(db)
+    .await?)
+}
+
+/// `Submission.find_by(slug:)`'s id.
+pub async fn submission_id_by_slug(
+    db: impl PgExecutor<'_>,
+    slug: &str,
+) -> Result<Option<i64>, DbError> {
+    Ok(
+        sqlx::query_scalar!("SELECT id FROM submissions WHERE slug = $1", slug)
+            .fetch_optional(db)
+            .await?,
+    )
+}
+
+/// `submitter.submitter_versions.create!(slug:, email:, name:, phone:)`.
+pub async fn insert_submitter_version(
+    db: impl PgExecutor<'_>,
+    submitter: &Submitter,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        r#"INSERT INTO submitter_versions (submitter_id, slug, email, name, phone, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))"#,
+        submitter.id,
+        submitter.slug,
+        submitter.email,
+        submitter.name,
+        submitter.phone,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// `SubmitFormDelegateController#create`: hands the form to another email under a new slug.
+pub async fn delegate(
+    db: impl PgExecutor<'_>,
+    id: i64,
+    email: &str,
+    slug: &str,
+    values: &JsonText,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        r#"UPDATE submitters SET email = $2, phone = NULL, name = NULL, slug = $3, values = $4,
+                                 updated_at = (now() AT TIME ZONE 'utc')
+           WHERE id = $1"#,
+        id,
+        email,
+        slug,
+        values as _,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// The newest `event_timestamp` of the submitter's events of this type.
+pub async fn latest_event_timestamp(
+    db: impl PgExecutor<'_>,
+    submitter_id: i64,
+    event_type: &str,
+) -> Result<Option<NaiveDateTime>, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT event_timestamp FROM submission_events
+           WHERE submitter_id = $1 AND event_type = $2
+           ORDER BY event_timestamp DESC LIMIT 1"#,
+        submitter_id,
+        event_type,
+    )
+    .fetch_optional(db)
+    .await?)
+}

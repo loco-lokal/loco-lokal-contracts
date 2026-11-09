@@ -296,7 +296,7 @@ async fn signs_in_with_a_rails_password_and_out_again(db: PgPool) {
     let mut client = Client::new(db.clone()).await;
 
     let redirect = client.get("/").await;
-    assert_eq!(redirect.location(), "/sign_in");
+    assert_eq!(redirect.location(), "http://localhost:3000/sign_in");
     let page = client.get("/sign_in").await;
     assert!(
         page.body
@@ -352,7 +352,10 @@ async fn signs_in_with_a_rails_password_and_out_again(db: PgPool) {
         .await
         .unwrap();
     assert_eq!(sessions, 0);
-    assert_eq!(client.get("/").await.location(), "/sign_in");
+    assert_eq!(
+        client.get("/").await.location(),
+        "http://localhost:3000/sign_in"
+    );
     assert_eq!(
         client.get("/api/user").await.status,
         StatusCode::UNAUTHORIZED
@@ -369,7 +372,10 @@ async fn returns_to_the_requested_page_after_sign_in(db: PgPool) {
     let mut client = Client::new(db).await;
 
     client.get("/up?x=1").await;
-    assert_eq!(client.get("/?tab=archived").await.location(), "/sign_in");
+    assert_eq!(
+        client.get("/?tab=archived").await.location(),
+        "http://localhost:3000/sign_in"
+    );
     let ok = sign_in(&mut client, "ana@example.test", RAILS_PASSWORD).await;
     assert_eq!(ok.location(), "/?tab=archived");
 }

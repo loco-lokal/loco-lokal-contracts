@@ -1,5 +1,4 @@
-{#- Port of app/views/submit_form/completed.html.erb. The resubmit button (start forms) is
-    not ported yet. -#}
+{#- Port of app/views/submit_form/completed.html.erb -#}
 {% extends "layouts/form.html" %}
 {% import "shared/_button_title.html" as buttons %}
 {% block content %}
@@ -48,6 +47,13 @@
         </download-button>
       {% endif %}
     </div>
+    {% if can_resubmit %}
+      <div class="divider uppercase">{{ t('or') }}</div>
+      <toggle-submit class="block">
+        <form class="button_to" method="post" action="/resubmit_form"><input type="hidden" name="_method" value="put" /><button class="white-button w-full" type="submit">{{ buttons.button_title(title=t('resubmit'), disabled_with=t('resubmit'), icon=svg_icon('reload', class='w-6 h-6')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="resubmit" value="{{ slug }}" /></form>
+      </toggle-submit>
+    {% endif %}
   </div>
 </div>
 {% include "shared/_attribution.html" %}

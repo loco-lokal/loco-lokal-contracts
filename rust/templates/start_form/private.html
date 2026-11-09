@@ -1,0 +1,33 @@
+{#- Port of app/views/start_form/private.html.erb -#}
+{% extends "layouts/form.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="max-w-md space-y-6 mx-auto px-2 mt-12 mb-4">
+  <div class="text-center w-full space-y-6">
+    {% include "start_form/_banner.html" %}
+    <p class="text-xl font-semibold text-center">
+      {{ t('share_link_is_currently_disabled') }}
+    </p>
+  </div>
+  <div class="flex items-center bg-base-200 rounded-xl p-4 mb-4">
+    <div class="flex items-center">
+      <div class="mr-3">
+        {{ svg_icon('writing_sign', class='w-10 h-10') }}
+      </div>
+      <div>
+        <p class="text-lg font-bold mb-1">{{ template_name }}</p>
+        {% if template_archived %}
+          <p dir="auto" class="text-sm">{{ t('form_has_been_deleted_by_html', name=account_name) }}</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% if can_update %}
+    <toggle-submit class="block">
+      <form class="button_to" method="post" action="/templates/{{ template_id }}/share_link"><button class="white-button w-full" type="submit">{{ buttons.button_title(title=t('enable_shared_link'), disabled_with=none, icon=svg_icon('lock_open', class='w-6 h-6')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="template[shared_link]" value="true" /><input type="hidden" name="redir" value="/d/{{ template_slug }}" /></form>
+    </toggle-submit>
+  {% endif %}
+</div>
+{% include "shared/_attribution.html" %}
+{% endblock %}

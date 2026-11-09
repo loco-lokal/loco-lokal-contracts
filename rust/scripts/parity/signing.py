@@ -63,10 +63,16 @@ class Browser:
         def redirect_request(self, *args, **kwargs):
             return None
 
+    class Policy(http.cookiejar.DefaultCookiePolicy):
+        """Sends `secure` cookies over http too, as a browser would over https."""
+
+        def return_ok_secure(self, cookie, request):
+            return True
+
     def __init__(self, base):
         self.base = base
         self.opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), self.NoRedirect
+            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar(self.Policy())), self.NoRedirect
         )
         self.csrf = None
 

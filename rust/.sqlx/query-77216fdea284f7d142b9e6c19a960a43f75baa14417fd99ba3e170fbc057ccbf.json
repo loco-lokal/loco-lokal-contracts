@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n             SELECT 1 FROM email_events\n             WHERE tag = $1 AND email = $2 AND emailable_type = $3 AND emailable_id = $4\n               AND event_type = 'send' AND created_at >= $5\n               AND created_at <= (now() AT TIME ZONE 'utc')) AS \"exists!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "77216fdea284f7d142b9e6c19a960a43f75baa14417fd99ba3e170fbc057ccbf"
+}

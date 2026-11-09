@@ -87,6 +87,17 @@ devise = {
   'friendly_token_length' => Devise.friendly_token.length
 }
 
+cookie_request = ActionDispatch::Request.new(
+  Rails.application.env_config.merge('HTTP_HOST' => 'example.test', 'rack.input' => StringIO.new)
+)
+cookie_jar = cookie_request.cookie_jar
+cookie_jar.encrypted[:start_form_slug] = { value: 'abc123XYZ', expires: Time.utc(2126, 1, 1) }
+cookie_jar.encrypted[:email_2fa_slug] = 'no-expiry'
+encrypted_cookies = {
+  'start_form_slug' => { 'value' => 'abc123XYZ', 'cookie' => cookie_jar[:start_form_slug] },
+  'email_2fa_slug' => { 'value' => 'no-expiry', 'cookie' => cookie_jar[:email_2fa_slug] }
+}
+
 password = 'correct horse battery staple'
 user = User.new(password:)
 
@@ -108,6 +119,7 @@ puts JSON.pretty_generate(
     'blob_signed_id' => active_storage_blob
   },
   'encrypted_config_smtp' => encrypted_config,
+  'encrypted_cookies' => encrypted_cookies,
   'devise' => devise,
   'bcrypt' => { 'password' => password, 'hash' => user.encrypted_password, 'pepper' => Devise.pepper }
 )

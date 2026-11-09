@@ -3,6 +3,7 @@
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod cookies;
 pub mod disk;
 pub mod email_variables;
 pub mod errors;

@@ -94,7 +94,7 @@ fn valid_color(color: &str) -> bool {
 }
 
 /// The request locale of the form pages (`with_browser_locale`).
-fn form_locale(
+pub(super) fn form_locale(
     state: &AppState,
     auth: Option<&Auth>,
     lang: Option<&str>,
@@ -1164,11 +1164,14 @@ pub async fn completed(
             .email
             .as_deref()
             .is_some_and(|e| !e.trim().is_empty());
-    let defined: Vec<&Value> = form
-        .template_submitters()
-        .iter()
-        .filter(|s| !blank(s.get("uuid")))
-        .collect();
+    let undefined = super::start_form::undefined_submitters(form.template_submitters());
+    let can_resubmit = undefined.len() == 1
+        && undefined[0].get("uuid").and_then(Value::as_str) == Some(form.submitter.uuid.as_str())
+        && form
+            .template
+            .as_ref()
+            .is_some_and(|t| t.archived_at.is_none())
+        && super::start_form::can_resubmit(&state, &form).await?;
     let recent = completed_at > Utc::now().naive_utc() - Duration::minutes(30);
     let owner = auth
         .as_ref()
@@ -1185,7 +1188,8 @@ pub async fn completed(
                 &[("time", time)],
             ),
             "can_email": can_email,
-            "single_party": defined.len() == 1,
+            "single_party": undefined.len() == 1,
+            "can_resubmit": can_resubmit,
             "can_download": recent || owner,
             "slug": form.submitter.slug,
         }))
@@ -1205,4 +1209,47 @@ pub async fn success(
         .with(json!({ "robots_noindex": true }))
         .render("submit_form/success.html")?
         .into_response())
+}
+
+/// `GET /s/:slug/delegated` (`SubmitFormController#delegated`): the old slug of a
+/// delegated form.
+pub async fn delegated(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    MaybeAuth(auth): MaybeAuth,
+    session: Session,
+    headers: HeaderMap,
+    Query(query): Query<ShowQuery>,
+) -> Result<Response, AppError> {
+    let locale = form_locale(&state, auth.as_ref(), query.lang.as_deref(), &headers);
+    let Some(submitter_id) = signing::submitter_version_submitter_id(&state.db, &slug).await?
+    else {
+        return Err(AppError::Status(StatusCode::NOT_FOUND));
+    };
+    let submitter = loco_db::submissions::find_submitter(&state.db, submitter_id)
+        .await?
+        .ok_or(AppError::Status(StatusCode::NOT_FOUND))?;
+    let form = Form::for_submitter(&state, submitter).await?;
+    if let Some(page) = locked_page(&state, &session, &locale, &form) {
+        return page;
+    }
+    let delegated_at =
+        signing::latest_event_timestamp(&state.db, form.submitter.id, "delegate_form")
+            .await?
+            .ok_or(AppError::Status(StatusCode::NOT_FOUND))?;
+    let time = l10n::local_date(
+        &state,
+        &locale,
+        delegated_at,
+        &form.account.timezone,
+        "long",
+    );
+    state_page(
+        &state,
+        &session,
+        &locale,
+        &form,
+        "submit_form/delegated.html",
+        json!({ "time": time }),
+    )
 }
