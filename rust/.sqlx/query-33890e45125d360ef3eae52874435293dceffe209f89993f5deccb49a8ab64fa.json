@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT nonce FROM otp_challenges WHERE key = $1 AND version = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "nonce",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "otp_challenges",
+            "name": "nonce"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "33890e45125d360ef3eae52874435293dceffe209f89993f5deccb49a8ab64fa"
+}

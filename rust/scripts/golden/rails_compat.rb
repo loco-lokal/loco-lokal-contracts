@@ -111,7 +111,8 @@ puts JSON.pretty_generate(
     'values' => encryption
   },
   'signed_id' => {
-    'secret_hex' => Rails.application.message_verifiers['active_record/signed_id'].instance_variable_get(:@secret).unpack1('H*'),
+    'secret_hex' => Rails.application.message_verifiers['active_record/signed_id']
+                         .instance_variable_get(:@secret).unpack1('H*'),
     'values' => signed
   },
   'active_storage' => {

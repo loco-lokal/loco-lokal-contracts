@@ -2,7 +2,7 @@
 //! (`/resubmit_form`), `Submitters::StartForm` and `Submissions::AssignDefinedSubmitters`.
 //!
 //! Email two-factor verification (`shared_link_2fa`, reopening a pending submitter without
-//! the start form cookie) answers 422: sending and checking codes is not ported yet.
+//! the start form cookie) sends and checks codes with `email_2fa`.
 
 use axum::{
     extract::{Path, State},
@@ -19,7 +19,11 @@ use loco_db::{
 use loco_domain::ability::Action;
 use serde_json::{Map, Value, json};
 
-use super::{actions::redirect_to, pages::form_locale};
+use super::{
+    actions::redirect_to,
+    email_2fa::{self, LinkOtp, UnableToSendCode},
+    pages::form_locale,
+};
 use crate::{
     api::{Params, create::email::normalize_email, templates::blank},
     auth::{Auth, MaybeAuth},
@@ -145,22 +149,27 @@ impl Contact {
         let mut pairs = Vec::new();
         for key in ["email", "name", "phone"] {
             if let Some(value) = self.present(key) {
-                pairs.push(format!(
-                    "{key}={}",
-                    percent_encoding::utf8_percent_encode(value, QUERY)
-                ));
+                pairs.push(format!("{key}={}", cgi_escape(value)));
             }
         }
         pairs.join("&")
     }
 }
 
-/// `CGI.escape`.
+/// What `CGI.escape` keeps.
 const QUERY: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b'*')
     .remove(b'-')
     .remove(b'.')
-    .remove(b'_');
+    .remove(b'_')
+    .remove(b' ');
+
+/// `CGI.escape`: spaces become `+`.
+pub(super) fn cgi_escape(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, QUERY)
+        .to_string()
+        .replace(' ', "+")
+}
 
 struct Loaded {
     template: Template,
@@ -177,7 +186,7 @@ async fn load_template(state: &AppState, slug: &str) -> Result<Loaded, AppError>
     Ok(Loaded { template, account })
 }
 
-async fn can_read(
+pub(super) async fn can_read(
     state: &AppState,
     auth: Option<&Auth>,
     template: &Template,
@@ -274,6 +283,194 @@ async fn render_show(
         .render("start_form/show.html")
 }
 
+/// Renders `start_form/email_verification`. `resubmit_slug` is the resubmitted party's.
+fn render_email_verification(
+    state: &AppState,
+    session: &Session,
+    locale: &str,
+    loaded: &Loaded,
+    params: &Params,
+    resubmit_slug: Option<&str>,
+) -> Result<Response, AppError> {
+    let Loaded { template, account } = loaded;
+    // `params[key] || params.dig(:submitter, key)`
+    let param = |key: &str| {
+        params
+            .get(key)
+            .filter(|v| !v.is_null())
+            .or_else(|| params.get("submitter").and_then(|s| s.get(key)))
+            .filter(|v| !v.is_null())
+            .map(crate::api::create::values::ruby_to_s)
+    };
+    let resend_submitter: Vec<(&str, Option<String>)> = ["email", "name", "phone"]
+        .into_iter()
+        .map(|key| (key, param(key)))
+        .collect();
+    Page::new(state, session, locale)
+        .with(json!({
+            "robots_noindex": true,
+            "html_title": format!("{} | Loco Lokal", template.name),
+            "html_description": state.views.t(
+                &account.locale,
+                "account_name_has_invited_you_to_fill_and_sign_documents_online_effortlessly_with_a_secure_fast_and_user_friendly_digital_document_signing_solution",
+                &[("account_name", account.name.clone())],
+            ),
+            "template_name": template.name,
+            "template_slug": template.slug,
+            "account_name": account.name,
+            "form_action": if resubmit_slug.is_some() {
+                "/resubmit_form".to_owned()
+            } else {
+                format!("/d/{}", template.slug)
+            },
+            "resubmit": params.get("resubmit").filter(|v| !v.is_null()).map(crate::api::create::values::ruby_to_s),
+            "resubmit_slug": resubmit_slug,
+            "name_value": param("name"),
+            "email_value": param("email"),
+            "phone_value": param("phone"),
+            "resend_submitter": resend_submitter,
+        }))
+        .render("start_form/email_verification.html")
+}
+
+/// A share link submitter that `save` would write.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one short-lived value per request"
+)]
+enum Pending {
+    Existing(Submitter),
+    New {
+        party: NewParty,
+        source: &'static str,
+    },
+}
+
+impl Pending {
+    fn email(&self) -> Option<&str> {
+        match self {
+            Self::Existing(s) => s.email.as_deref(),
+            Self::New { party, .. } => party.email.as_deref(),
+        }
+    }
+
+    fn slug(&self) -> Option<&str> {
+        match self {
+            Self::Existing(s) => Some(&s.slug),
+            Self::New { .. } => None,
+        }
+    }
+
+    /// `save` (with `enqueue_new_submitter_jobs` for a new submitter).
+    async fn save(
+        self,
+        state: &AppState,
+        template: &Template,
+        ip: Option<&str>,
+        ua: Option<&str>,
+    ) -> Result<Submitter, AppError> {
+        match self {
+            Self::Existing(submitter) => {
+                signing::set_submitter_request(&state.db, submitter.id, ip, ua).await?;
+                Ok(submitter)
+            }
+            Self::New { party, source } => {
+                create_submission(state, template, party, source, ip, ua).await
+            }
+        }
+    }
+}
+
+/// Where `handle_require_2fa` goes when no code was sent or it failed.
+enum Retry {
+    /// `StartFormController`: back to `?email_verification` with an alert.
+    Redirect(Value),
+    /// `StartFormResubmitController`: the verification page with `flash.now`.
+    Render(String),
+}
+
+/// `handle_require_2fa` with `Submitters::StartForm.verify_2fa_and_save_submitter`.
+#[allow(clippy::too_many_arguments)]
+async fn handle_require_2fa(
+    state: &AppState,
+    session: &Session,
+    headers: &HeaderMap,
+    auth: Option<&Auth>,
+    locale: &str,
+    loaded: &Loaded,
+    params: &Params,
+    pending: Pending,
+    retry: Retry,
+    (ip, ua): (Option<&str>, Option<&str>),
+) -> Result<Response, AppError> {
+    let template = &loaded.template;
+    let Some(email) = pending.email().map(str::to_owned) else {
+        return unsupported(
+            state,
+            session,
+            locale,
+            template,
+            "Email two-factor verification without an email is not supported yet",
+        );
+    };
+    let resubmit_slug = match &retry {
+        Retry::Render(slug) => Some(slug.as_str()),
+        Retry::Redirect(_) => None,
+    };
+    let fail = |message: String| -> Result<Response, AppError> {
+        match &retry {
+            Retry::Redirect(submitter_params) => {
+                session.flash_alert(message);
+                Ok(redirect_to(
+                    state,
+                    headers,
+                    &email_2fa::verification_path(&template.slug, submitter_params),
+                ))
+            }
+            Retry::Render(_) => {
+                session.flash_now_alert(message);
+                render_email_verification(state, session, locale, loaded, params, resubmit_slug)
+            }
+        }
+    };
+    let verified =
+        match email_2fa::verify_link_otp(state, params.get("one_time_code"), &email, template)
+            .await?
+        {
+            LinkOtp::TooManyAttempts => {
+                return fail(state.views.t(locale, "too_many_attempts", &[]));
+            }
+            LinkOtp::Invalid => return fail(state.views.t(locale, "invalid_code", &[])),
+            LinkOtp::Blank => false,
+            LinkOtp::Verified => true,
+        };
+    let cookie = crate::cookies::encrypted(state, headers, EMAIL_2FA_COOKIE);
+    if !verified && (pending.slug().is_none() || cookie.as_deref() != pending.slug()) {
+        return match email_2fa::send_link_code(state, locale, template, &email, ip).await? {
+            Ok(()) => {
+                render_email_verification(state, session, locale, loaded, params, resubmit_slug)
+            }
+            Err(UnableToSendCode(message)) => fail(message),
+        };
+    }
+    let submitter = pending.save(state, template, ip, ua).await?;
+    let mut response = start_redirect(state, headers, &submitter.slug);
+    if verified {
+        email_2fa::track_email_verified(
+            state,
+            &submitter,
+            ip,
+            headers,
+            session,
+            auth.map(|a| a.true_user.id),
+            Map::new(),
+        )
+        .await?;
+        email_2fa::set_email_2fa_cookie(state, headers, &mut response, &submitter.slug);
+    }
+    Ok(response)
+}
+
 /// `GET /d/:slug`.
 pub async fn show(
     State(state): State<AppState>,
@@ -297,14 +494,11 @@ pub async fn show(
         return Err(not_found());
     }
     if template.shared_link {
-        if params.str("email_verification").is_some() {
-            return unsupported(
-                &state,
-                &session,
-                &locale,
-                template,
-                "Email two-factor verification is not supported yet",
-            );
+        if params
+            .get("email_verification")
+            .is_some_and(|v| !v.is_null())
+        {
+            return render_email_verification(&state, &session, &locale, &loaded, &params, None);
         }
         return render_show(
             &state,
@@ -743,27 +937,8 @@ pub async fn update(
                         && a.user.account_id == s.account_id
                 })
         });
-    if require_2fa {
-        // `verify_2fa_and_save_submitter` without a code passes only with the cookie.
-        let verified = existing.as_ref().is_some_and(|s| {
-            crate::cookies::encrypted(&state, &headers, EMAIL_2FA_COOKIE).as_deref()
-                == Some(s.slug.as_str())
-        });
-        if !verified || params.str("one_time_code").is_some() {
-            return unsupported(
-                &state,
-                &session,
-                &locale,
-                template,
-                "Email two-factor verification is not supported yet",
-            );
-        }
-    }
-
-    let submitter = if let Some(submitter) = existing {
-        signing::set_submitter_request(&state.db, submitter.id, ip.as_deref(), ua.as_deref())
-            .await?;
-        submitter
+    let pending = if let Some(submitter) = existing {
+        Pending::Existing(submitter)
     } else {
         if has_dynamic_documents(template) {
             return unsupported(
@@ -779,10 +954,8 @@ pub async fn update(
             .any(|k| k == "name")
             .then(|| contact.name.clone())
             .flatten();
-        create_submission(
-            &state,
-            template,
-            NewParty {
+        Pending::New {
+            party: NewParty {
                 email,
                 phone,
                 name,
@@ -790,12 +963,27 @@ pub async fn update(
                 preferences: json!({ "send_email": true }),
                 metadata: json!({}),
             },
-            "link",
-            ip.as_deref(),
-            ua.as_deref(),
-        )
-        .await?
+            source: "link",
+        }
     };
+    if require_2fa {
+        return handle_require_2fa(
+            &state,
+            &session,
+            &headers,
+            auth.as_ref(),
+            &locale,
+            &loaded,
+            &params,
+            pending,
+            Retry::Redirect(submitter_params.clone()),
+            (ip.as_deref(), ua.as_deref()),
+        )
+        .await;
+    }
+    let submitter = pending
+        .save(&state, template, ip.as_deref(), ua.as_deref())
+        .await?;
     Ok(start_redirect(&state, &headers, &submitter.slug))
 }
 
@@ -993,24 +1181,12 @@ pub async fn resubmit(
         )
         .await;
     }
-    if template.preferences.get("shared_link_2fa") == Some(&Value::Bool(true)) {
-        return unsupported(
-            &state,
-            &session,
-            &locale,
-            template,
-            "Email two-factor verification is not supported yet",
-        );
-    }
-
     let ua = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
-    let submitter = if let Some(submitter) = existing {
-        signing::set_submitter_request(&state.db, submitter.id, ip.as_deref(), ua.as_deref())
-            .await?;
-        submitter
+    let pending = if let Some(submitter) = existing {
+        Pending::Existing(submitter)
     } else {
         if has_dynamic_documents(template) {
             return unsupported(
@@ -1051,10 +1227,8 @@ pub async fn resubmit(
         } else {
             "link"
         };
-        create_submission(
-            &state,
-            template,
-            NewParty {
+        Pending::New {
+            party: NewParty {
                 email: resubmitted.email.clone(),
                 phone: resubmitted.phone.clone(),
                 name: resubmitted.name.clone(),
@@ -1063,10 +1237,25 @@ pub async fn resubmit(
                 metadata,
             },
             source,
-            ip.as_deref(),
-            ua.as_deref(),
-        )
-        .await?
+        }
     };
+    if template.preferences.get("shared_link_2fa") == Some(&Value::Bool(true)) {
+        return handle_require_2fa(
+            &state,
+            &session,
+            &headers,
+            auth.as_ref(),
+            &locale,
+            &loaded,
+            &params,
+            pending,
+            Retry::Render(resubmitted.slug.clone()),
+            (ip.as_deref(), ua.as_deref()),
+        )
+        .await;
+    }
+    let submitter = pending
+        .save(&state, template, ip.as_deref(), ua.as_deref())
+        .await?;
     Ok(start_redirect(&state, &headers, &submitter.slug))
 }
