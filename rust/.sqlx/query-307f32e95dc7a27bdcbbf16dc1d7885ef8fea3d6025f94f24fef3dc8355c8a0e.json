@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE otp_challenges SET verified_at = (now() AT TIME ZONE 'utc')\n           WHERE id = $1 AND verified_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "307f32e95dc7a27bdcbbf16dc1d7885ef8fea3d6025f94f24fef3dc8355c8a0e"
+}

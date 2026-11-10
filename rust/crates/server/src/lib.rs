@@ -14,6 +14,7 @@ pub mod l10n;
 pub mod locale;
 pub mod mail;
 pub mod markdown;
+pub mod otp;
 pub mod page;
 pub mod purge;
 pub mod rate_limit;
@@ -53,6 +54,8 @@ pub fn job_registry() -> loco_jobs::Registry<JobContext> {
         .register::<search::ReindexSearchEntry>()
         .register::<mail::SendInvitation>()
         .register::<mail::SendDeclined>()
+        .register::<signing::email_2fa::SendSubmitterVerificationEmail>()
+        .register::<signing::email_2fa::SendTemplateVerificationEmail>()
         .register::<signing::emails::SendCompleted>()
         .register::<signing::emails::SendDocumentsCopy>()
         .register::<signing::completion::ProcessSubmitterCompletion>()

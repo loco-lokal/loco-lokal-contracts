@@ -1,0 +1,55 @@
+{#- Port of app/views/start_form/email_verification.html.erb -#}
+{% extends "layouts/form.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="max-w-md mx-auto px-2 mt-12 mb-4">
+  <div class="space-y-6 mx-auto">
+    <div class="space-y-6">
+      <div class="flex items-center justify-center">
+        {% include "start_form/_banner.html" %}
+      </div>
+      <div class="flex items-center bg-base-200 rounded-xl p-4 mb-4">
+        <div class="flex items-center">
+          <div class="mr-3">
+            {{ svg_icon('writing_sign', class='w-10 h-10') }}
+          </div>
+          <div>
+            <p class="text-lg font-bold mb-1">{{ template_name }}</p>
+            <p dir="auto" class="text-sm">{{ t('invited_by_html', name=account_name) }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      {{ t('we_sent_a_one_time_verification_code_to_your_email_address_please_enter_the_code_below_to_continue') }}
+    </div>
+    <form class="space-y-4" id="code_form" action="{{ form_action }}" accept-charset="UTF-8" method="post"><input type="hidden" name="_method" value="put" /><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+      <div dir="auto" class="form-control !mt-0">
+        <input {% if resubmit is not none %}value="{{ resubmit }}" {% endif %}type="hidden" name="resubmit" id="resubmit" />
+        <input {% if name_value is not none %}value="{{ name_value }}" {% endif %}type="hidden" name="submitter[name]" id="submitter[name]" />
+        <input {% if email_value is not none %}value="{{ email_value }}" {% endif %}type="hidden" name="submitter[email]" id="submitter[email]" />
+        <input {% if phone_value is not none %}value="{{ phone_value }}" {% endif %}type="hidden" name="submitter[phone]" id="submitter[phone]" />
+        <input required="required" inputmode="numeric" class="base-input text-center" placeholder="XXXXXX" type="text" name="one_time_code" id="one_time_code" />
+        <div class="flex justify-between items-center mt-1">
+          <span>
+            {% if flash.alert %}
+              <span class="text-red-500">
+                {{ flash.alert }}
+              </span>
+            {% elif flash.notice %}
+              {{ flash.notice }}
+            {% endif %}
+          </span>
+          <span>
+            <label for="resend_code" id="resend_label" class="link">{{ t('re_send_code') }}</label>
+          </span>
+        </div>
+      </div>
+      <toggle-submit dir="auto" class="form-control">
+        <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('submit'), disabled_with=t('submitting')) }}
+</button>
+      </toggle-submit>
+</form>{% if resubmit_slug %}      <form class="button_to" method="post" action="/resubmit_form"><input type="hidden" name="_method" value="put" /><button id="resend_code" class="hidden" type="submit">{{ t('re_send_email') }}</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="resubmit" value="{{ resubmit_slug }}" /></form>{% else %}      <form class="button_to" method="post" action="/start_form_email_2fa_send"><button id="resend_code" class="hidden" type="submit">{{ t('re_send_email') }}</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="resend" value="true" /><input type="hidden" name="slug" value="{{ template_slug }}" />{% for key, value in resend_submitter %}<input type="hidden" name="submitter[{{ key }}]" {% if value is not none %}value="{{ value }}" {% endif %}/>{% endfor %}</form>{% endif %}
+  </div>
+</div>
+{% endblock %}

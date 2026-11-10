@@ -6,6 +6,7 @@
 
 pub mod destroy;
 mod json_text;
+pub mod otp;
 pub mod records;
 pub mod search;
 pub mod sessions;

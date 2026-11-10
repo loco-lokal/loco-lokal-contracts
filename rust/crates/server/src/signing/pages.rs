@@ -41,6 +41,8 @@ const US_LETTER_SIZE: (i64, i64) = (1400, 1812);
 pub struct ShowQuery {
     lang: Option<String>,
     signature: Option<String>,
+    status: Option<String>,
+    t: Option<String>,
 }
 
 /// `Float#to_s`: `25.0`, `17.973856209150327`, `1.0e-05`.
@@ -215,13 +217,14 @@ pub async fn show(
         ));
     }
     if !access.pass_email_2fa(&form) {
-        return Page::new(&state, &session, &locale)
-            .status(StatusCode::UNPROCESSABLE_ENTITY)
-            .with(json!({
-                "name": title(&form),
-                "message": "Email two-factor verification is not supported yet",
-            }))
-            .render("submit_form/unsupported.html");
+        return super::email_2fa::email_2fa_page(
+            &state,
+            &session,
+            &locale,
+            &form,
+            query.status.as_deref(),
+            query.t.as_deref(),
+        );
     }
     if form.submitter.completed_at.is_some() || form.submission.completed_at.is_some() {
         return Ok(redirect_to(
