@@ -156,3 +156,22 @@ async fn loads_rails_encrypted_smtp_settings(db: PgPool) {
         &loco_mailer::SenderOverride::Fixed("\"Loco Lokal\" <contracts@example.test>".into())
     );
 }
+
+/// The submission preview and the phone signature page answer 404 for unknown slugs, as
+/// `find_by!` does in Rails.
+#[sqlx::test(
+    migrations = false,
+    fixtures(path = "../../../schema", scripts("baseline"))
+)]
+async fn preview_pages_of_unknown_slugs_are_not_found(db: PgPool) {
+    let app = app(db).await;
+    for uri in [
+        "/e/nope",
+        "/e/nope?sig=bogus",
+        "/e/nope/completed",
+        "/e/nope/download",
+        "/p/nope?f=abc",
+    ] {
+        assert_eq!(get(&app, uri, None).await.0, StatusCode::NOT_FOUND, "{uri}");
+    }
+}

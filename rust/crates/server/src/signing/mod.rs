@@ -9,6 +9,7 @@ pub mod completion;
 pub mod downloads;
 pub mod emails;
 pub mod pages;
+pub mod preview;
 pub mod results;
 pub mod send_email;
 pub mod start_form;
@@ -57,6 +58,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/d/{slug}/completed", get(start_form::completed))
         .route("/send_submission_email", post(send_email::create))
+        .route("/e/{slug}", get(preview::show))
+        .route("/e/{slug}/completed", get(preview::completed))
+        .route("/e/{slug}/download", get(preview::download))
+        .route("/p/{slug}", get(preview::draw_signature))
         .route(
             "/resubmit_form",
             axum::routing::put(start_form::resubmit).patch(start_form::resubmit),

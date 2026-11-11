@@ -3,7 +3,8 @@
 # Seeds the Rails reference database with data for the API parity checks (run through
 # rust/scripts/parity/seed.sh). Idempotent: an existing "Parity NDA" template is reused.
 #
-# Prints PARITY_TOKEN (the first user's API token) and PARITY_TEMPLATE_ID.
+# Prints PARITY_TOKEN (the first user's API token) and PARITY_TEMPLATE_ID, and creates the
+# parity-viewer@example.com user.
 
 user = User.order(:id).first || abort('Complete the first-run setup first.')
 token = user.access_token || user.create_access_token!
@@ -55,6 +56,13 @@ unless template
         'type' => 'signature', 'required' => true, 'areas' => area.call(0.6, 0.8, 0.3, 0.08) }
     ]
   )
+end
+
+# A second user of the account with a known password, for the signed-in page checks
+# (preview.py signs in with it on both servers).
+unless user.account.users.exists?(email: 'parity-viewer@example.com')
+  User.create!(account: user.account, email: 'parity-viewer@example.com', password: 'parity-viewer-password',
+               first_name: 'Parity', last_name: 'Viewer', role: User::ADMIN_ROLE)
 end
 
 puts "PARITY_TOKEN=#{token.token}"
