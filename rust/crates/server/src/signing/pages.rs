@@ -31,11 +31,11 @@ use crate::{
 };
 
 /// `PdfUtils::US_LETTER_W`.
-const US_LETTER_W: f64 = 72.0 * 8.5;
+pub(super) const US_LETTER_W: f64 = 72.0 * 8.5;
 /// `Submissions::GenerateResultAttachments::FONT_SIZE`.
 const FONT_SIZE: i64 = 11;
 /// `Templates::ProcessDocument::US_LETTER_SIZE`.
-const US_LETTER_SIZE: (i64, i64) = (1400, 1812);
+pub(super) const US_LETTER_SIZE: (i64, i64) = (1400, 1812);
 
 #[derive(Deserialize)]
 pub struct ShowQuery {
@@ -72,7 +72,7 @@ pub fn ruby_float(f: f64) -> String {
     }
 }
 
-fn float(value: Option<&Value>) -> f64 {
+pub(super) fn float(value: Option<&Value>) -> f64 {
     match value {
         Some(Value::Number(n)) => n.as_f64().unwrap_or(0.0),
         Some(Value::String(s)) => s.trim().parse().unwrap_or(0.0),
@@ -327,7 +327,7 @@ pub async fn show(
 }
 
 /// `content_security_policy_nonce_generator`: `SecureRandom.base64(16)`.
-fn csp_nonce() -> String {
+pub(super) fn csp_nonce() -> String {
     use base64::Engine as _;
     let mut bytes = [0_u8; 16];
     rand::fill(&mut bytes);
@@ -617,12 +617,6 @@ impl ShowView {
         Ok(view)
     }
 
-    fn attachment_url(&self, state: &AppState, uuid: &str) -> Option<String> {
-        self.attachments
-            .get(uuid)
-            .map(|(_, blob)| crate::disk::blob_url(state, &self.origin, blob))
-    }
-
     /// One `submissions/_value` partial, or `None` when the show loop skips the field.
     #[allow(clippy::too_many_arguments, reason = "the partial's locals")]
     fn field_value(
@@ -683,292 +677,324 @@ impl ShowView {
             None => value,
         };
         let owner = owner?;
-        Some(self.value_partial(
-            state,
-            form,
-            configs,
-            area,
-            field,
-            &value,
-            owner,
+        let locals = ValueLocals {
+            locale: &form.account.locale,
+            timezone: &form.account.timezone,
+            with_signature_id: configs.with_signature_id,
+            with_submitter_timezone: configs.with_submitter_timezone,
+            with_timestamp_seconds: configs.with_timestamp_seconds,
+            with_signature_id_reason: configs.with_signature_id_reason,
+            with_signature_id_completed_at: configs.with_signature_id_completed_at,
             page_width,
             page_height,
             font_scale,
+        };
+        Some(value_partial(
+            state,
+            &self.attachments,
+            &self.origin,
+            &locals,
+            area,
+            field,
+            &value,
+            Some(owner),
         ))
     }
+}
 
-    #[allow(clippy::too_many_arguments, reason = "the partial's locals")]
-    fn value_partial(
-        &self,
-        state: &AppState,
-        form: &Form,
-        configs: &FormConfigs,
-        area: &Value,
-        field: &Value,
-        value: &Value,
-        submitter: &loco_db::submissions::Submitter,
-        page_width: f64,
-        page_height: f64,
-        font_scale: f64,
-    ) -> Value {
-        let pref = |key: &str| {
-            field
-                .pointer(&format!("/preferences/{key}"))
-                .and_then(Value::as_str)
-        };
-        let align = pref("align");
-        let valign = pref("valign");
-        let color = pref("color").filter(|c| valid_color(c));
-        let bg_color = pref("background").filter(|c| valid_color(c));
-        let font = pref("font");
-        let font_type = pref("font_type");
-        let font_size = field
-            .pointer("/preferences/font_size")
-            .filter(|v| present(Some(v)))
-            .map_or(FONT_SIZE, |v| match v {
-                #[allow(clippy::cast_possible_truncation, reason = "Float#to_i")]
-                Value::Number(n) => n
-                    .as_i64()
-                    .unwrap_or_else(|| n.as_f64().unwrap_or(0.0) as i64),
-                Value::String(s) => s.trim().parse().unwrap_or(0),
-                _ => 0,
-            });
-        #[allow(clippy::cast_precision_loss, reason = "font sizes are small")]
-        let font_size_px = font_size as f64 * font_scale;
-        let class = format!(
-            "flex absolute {} {} {} {} {}",
-            if font == Some("Courier") {
-                "font-courier"
-            } else {
-                ""
-            },
-            if font == Some("Times") {
-                "font-times"
-            } else {
-                ""
-            },
-            if matches!(font_type, Some("bold" | "bold_italic")) {
-                "font-bold"
-            } else {
-                ""
-            },
-            if matches!(font_type, Some("italic" | "bold_italic")) {
-                "italic"
-            } else {
-                ""
-            },
-            match align {
-                Some("right") => "text-right",
-                Some("center") => "text-center",
-                _ => "",
-            },
-        );
-        let fs1 = format!(
-            "clamp(1pt, {}vw, {}px)",
-            ruby_float(font_size_px / 10.0),
-            ruby_float(font_size_px)
-        );
-        let fs2 = format!("{}cqmin", ruby_float(font_size_px / 10.0));
-        let style = format!(
-            "{}{}width: {}%; height: {}%; left: {}%; top: {}%; font-size: {fs1}; line-height: calc({fs1} * 1.3); font-size: {fs2}; line-height: calc({fs2} * 1.3)",
-            color.map(|c| format!("color: {c}; ")).unwrap_or_default(),
-            bg_color
-                .map(|c| format!("background: {c}; "))
-                .unwrap_or_default(),
-            ruby_float(float(area.get("w")) * 100.0),
-            ruby_float(float(area.get("h")) * 100.0),
-            ruby_float(float(area.get("x")) * 100.0),
-            ruby_float(float(area.get("y")) * 100.0),
-        );
-        let valign_class = match valign {
-            Some("top") => "items-start",
-            Some("bottom") => "items-end",
-            _ => "items-center",
-        };
-        let field_type = str_of(field, "type").unwrap_or_default();
-        let alt = str_of(field, "name")
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| str_of(field, "title").filter(|s| !s.trim().is_empty()))
-            .unwrap_or(field_type)
-            .to_owned();
-        let value_str = value.as_str().unwrap_or_default();
-        let attachment = self.attachments.get(value_str);
-        let is_image = attachment.is_some_and(|(_, b)| {
-            b.content_type
-                .as_deref()
-                .is_some_and(|c| c.starts_with("image/"))
+/// The locals of the `submissions/_value` partial besides the field, its area and value.
+#[allow(clippy::struct_excessive_bools, reason = "the partial's locals")]
+pub struct ValueLocals<'a> {
+    pub locale: &'a str,
+    pub timezone: &'a str,
+    pub with_signature_id: bool,
+    pub with_submitter_timezone: bool,
+    pub with_timestamp_seconds: bool,
+    pub with_signature_id_reason: bool,
+    pub with_signature_id_completed_at: bool,
+    pub page_width: f64,
+    pub page_height: f64,
+    pub font_scale: f64,
+}
+
+/// The view model of one `submissions/_value` partial (`v` in the template).
+#[allow(
+    clippy::too_many_arguments,
+    clippy::implicit_hasher,
+    reason = "the partial's locals"
+)]
+#[must_use]
+pub fn value_partial(
+    state: &AppState,
+    attachments: &HashMap<String, (Attachment, Blob)>,
+    origin: &str,
+    opts: &ValueLocals<'_>,
+    area: &Value,
+    field: &Value,
+    value: &Value,
+    submitter: Option<&loco_db::submissions::Submitter>,
+) -> Value {
+    let ValueLocals {
+        page_width,
+        page_height,
+        font_scale,
+        ..
+    } = *opts;
+    let attachment_url = |uuid: &str| {
+        attachments
+            .get(uuid)
+            .map(|(_, blob)| crate::disk::blob_url(state, origin, blob))
+    };
+    let pref = |key: &str| {
+        field
+            .pointer(&format!("/preferences/{key}"))
+            .and_then(Value::as_str)
+    };
+    let align = pref("align");
+    let valign = pref("valign");
+    let color = pref("color").filter(|c| valid_color(c));
+    let bg_color = pref("background").filter(|c| valid_color(c));
+    let font = pref("font");
+    let font_type = pref("font_type");
+    let font_size = field
+        .pointer("/preferences/font_size")
+        .filter(|v| present(Some(v)))
+        .map_or(FONT_SIZE, |v| match v {
+            #[allow(clippy::cast_possible_truncation, reason = "Float#to_i")]
+            Value::Number(n) => n
+                .as_i64()
+                .unwrap_or_else(|| n.as_f64().unwrap_or(0.0) as i64),
+            Value::String(s) => s.trim().parse().unwrap_or(0),
+            _ => 0,
         });
-        let locale = &form.account.locale;
-        let mut out = json!({
-            "class": class,
-            "style": style,
-            "valign_class": valign_class,
-            "alt": alt,
-        });
-        let w = float(area.get("w"));
-        let h = float(area.get("h"));
-        let check_class = if w > h {
-            "!w-auto !h-full"
+    #[allow(clippy::cast_precision_loss, reason = "font sizes are small")]
+    let font_size_px = font_size as f64 * font_scale;
+    let class = format!(
+        "flex absolute {} {} {} {} {}",
+        if font == Some("Courier") {
+            "font-courier"
         } else {
-            "!w-full !h-auto"
-        };
+            ""
+        },
+        if font == Some("Times") {
+            "font-times"
+        } else {
+            ""
+        },
+        if matches!(font_type, Some("bold" | "bold_italic")) {
+            "font-bold"
+        } else {
+            ""
+        },
+        if matches!(font_type, Some("italic" | "bold_italic")) {
+            "italic"
+        } else {
+            ""
+        },
+        match align {
+            Some("right") => "text-right",
+            Some("center") => "text-center",
+            _ => "",
+        },
+    );
+    let fs1 = format!(
+        "clamp(1pt, {}vw, {}px)",
+        ruby_float(font_size_px / 10.0),
+        ruby_float(font_size_px)
+    );
+    let fs2 = format!("{}cqmin", ruby_float(font_size_px / 10.0));
+    let style = format!(
+        "{}{}width: {}%; height: {}%; left: {}%; top: {}%; font-size: {fs1}; line-height: calc({fs1} * 1.3); font-size: {fs2}; line-height: calc({fs2} * 1.3)",
+        color.map(|c| format!("color: {c}; ")).unwrap_or_default(),
+        bg_color
+            .map(|c| format!("background: {c}; "))
+            .unwrap_or_default(),
+        ruby_float(float(area.get("w")) * 100.0),
+        ruby_float(float(area.get("h")) * 100.0),
+        ruby_float(float(area.get("x")) * 100.0),
+        ruby_float(float(area.get("y")) * 100.0),
+    );
+    let valign_class = match valign {
+        Some("top") => "items-start",
+        Some("bottom") => "items-end",
+        _ => "items-center",
+    };
+    let field_type = str_of(field, "type").unwrap_or_default();
+    let alt = str_of(field, "name")
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| str_of(field, "title").filter(|s| !s.trim().is_empty()))
+        .unwrap_or(field_type)
+        .to_owned();
+    let value_str = value.as_str().unwrap_or_default();
+    let attachment = attachments.get(value_str);
+    let is_image = attachment.is_some_and(|(_, b)| {
+        b.content_type
+            .as_deref()
+            .is_some_and(|c| c.starts_with("image/"))
+    });
+    let locale = opts.locale;
+    let mut out = json!({
+        "class": class,
+        "style": style,
+        "valign_class": valign_class,
+        "alt": alt,
+    });
+    let w = float(area.get("w"));
+    let h = float(area.get("h"));
+    let check_class = if w > h {
+        "!w-auto !h-full"
+    } else {
+        "!w-full !h-auto"
+    };
 
-        match field_type {
-            "signature" => {
-                let is_narrow = h > 0.0 && (w * page_width) / (h * page_height) > 4.5;
-                let reason_uuid = pref("reason_field_uuid").filter(|s| !s.trim().is_empty());
-                let show_id = configs.with_signature_id || reason_uuid.is_some();
-                let mut signature = json!({
-                    "kind": "signature",
-                    "row": is_narrow && show_id,
-                    "narrow": is_narrow,
-                    "src": self.attachment_url(state, value_str),
-                });
-                if show_id && let Some((attachment, _)) = attachment {
-                    let reason_value = reason_uuid
-                        .and_then(|u| submitter.values.get(u))
-                        .filter(|v| present(Some(v)))
-                        .map(crate::api::create::values::ruby_to_s);
-                    let timezone = if configs.with_submitter_timezone {
-                        submitter
-                            .timezone
-                            .clone()
-                            .unwrap_or_else(|| form.account.timezone.clone())
-                    } else {
-                        form.account.timezone.clone()
-                    };
-                    let format = if configs.with_timestamp_seconds {
-                        "detailed"
-                    } else {
-                        "long"
-                    };
-                    let timestamp = if configs.with_signature_id_completed_at {
-                        submitter.completed_at.unwrap_or(attachment.created_at)
-                    } else {
-                        attachment.created_at
-                    };
-                    signature["id"] = json!({
-                        "uuid": attachment.uuid,
-                        "with_reason": configs.with_signature_id_reason,
-                        "reason_value": reason_value,
-                        "name": submitter.name,
-                        "email": submitter.email,
-                        "time": l10n::time(state, locale, timestamp, &timezone, format),
-                        "zone": l10n::timezone_abbr(&timezone, timestamp),
-                    });
-                }
-                merge(&mut out, signature);
-            }
-            "image" | "initials" | "stamp" | "kba" if is_image => {
-                merge(
-                    &mut out,
-                    json!({ "kind": "image", "src": self.attachment_url(state, value_str) }),
-                );
-            }
-            "file" | "payment" | "image" => {
-                let files: Vec<Value> = wrap(Some(value))
-                    .iter()
-                    .filter_map(|v| {
-                        let (_, blob) = self.attachments.get(v.as_str()?)?;
-                        Some(json!({
-                            "url": crate::disk::blob_url(state, &self.origin, blob),
-                            "filename": blob.filename,
-                        }))
-                    })
-                    .collect();
-                merge(&mut out, json!({ "kind": "files", "files": files }));
-            }
-            "checkbox" => merge(
-                &mut out,
-                json!({ "kind": "check", "check_class": check_class }),
-            ),
-            "multiple" | "radio" if area.get("option_uuid").is_some_and(|v| !v.is_null()) => {
-                let options = field.get("options").and_then(Value::as_array);
-                let checked = options
-                    .and_then(|options| {
-                        let option = options
-                            .iter()
-                            .find(|o| o.get("uuid") == area.get("option_uuid"))?;
-                        let name = rules::option_name(field, option, "Option");
-                        Some(
-                            wrap(Some(value))
-                                .iter()
-                                .any(|v| v.as_str() == Some(name.as_str())),
-                        )
-                    })
-                    .unwrap_or(false);
-                merge(
-                    &mut out,
-                    json!({ "kind": "option", "checked": checked, "check_class": check_class }),
-                );
-            }
-            "cells" if float(area.get("cell_w")) > 0.0 => {
-                let cell_w = float(area.get("cell_w"));
-                let chars: Vec<char> = value_str.chars().collect();
-                #[allow(
-                    clippy::cast_possible_truncation,
-                    clippy::cast_sign_loss,
-                    reason = "cell counts"
-                )]
-                let count = (w / cell_w).ceil() as usize;
-                let cells: Vec<String> = (0..=count)
-                    .filter_map(|i| chars.get(i).map(char::to_string))
-                    .collect();
-                merge(
-                    &mut out,
-                    json!({
-                        "kind": "cells",
-                        "cells": cells,
-                        "cell_width": ruby_float(cell_w / w * 100.0),
-                        "justify_end": align == Some("right"),
-                    }),
-                );
-            }
-            "date" => {
-                let tz = if configs.with_submitter_timezone {
+    match field_type {
+        "signature" => {
+            let is_narrow = h > 0.0 && (w * page_width) / (h * page_height) > 4.5;
+            let reason_uuid = pref("reason_field_uuid").filter(|s| !s.trim().is_empty());
+            let show_id = opts.with_signature_id || reason_uuid.is_some();
+            let mut signature = json!({
+                "kind": "signature",
+                "row": is_narrow && show_id,
+                "narrow": is_narrow,
+                "src": attachment_url(value_str),
+            });
+            if show_id && let Some((attachment, _)) = attachment {
+                let reason_value = reason_uuid
+                    .and_then(|u| submitter?.values.get(u))
+                    .filter(|v| present(Some(v)))
+                    .map(crate::api::create::values::ruby_to_s);
+                let timezone = submitter
+                    .and_then(|s| s.timezone.clone())
+                    .filter(|_| opts.with_submitter_timezone)
+                    .unwrap_or_else(|| opts.timezone.to_owned());
+                let format = if opts.with_timestamp_seconds {
+                    "detailed"
+                } else {
+                    "long"
+                };
+                let timestamp = if opts.with_signature_id_completed_at {
                     submitter
-                        .timezone
-                        .clone()
-                        .filter(|t| !t.trim().is_empty())
-                        .unwrap_or_else(|| form.account.timezone.clone())
+                        .and_then(|s| s.completed_at)
+                        .unwrap_or(attachment.created_at)
                 } else {
-                    form.account.timezone.clone()
+                    attachment.created_at
                 };
-                let text = if value_str == "{{date}}" {
-                    l10n::format_date_preview(state, pref("format"), locale, &tz)
-                } else {
-                    l10n::format_date_string(
-                        state,
-                        &crate::api::create::values::ruby_to_s(value),
-                        pref("format"),
-                        locale,
-                        &tz,
-                    )
-                };
-                merge(&mut out, json!({ "kind": "date", "text": text }));
+                signature["id"] = json!({
+                    "uuid": attachment.uuid,
+                    "with_reason": opts.with_signature_id_reason,
+                    "reason_value": reason_value,
+                    "name": submitter.and_then(|s| s.name.clone()),
+                    "email": submitter.and_then(|s| s.email.clone()),
+                    "time": l10n::time(state, locale, timestamp, &timezone, format),
+                    "zone": l10n::timezone_abbr(&timezone, timestamp),
+                });
             }
-            "number" => merge(
-                &mut out,
-                json!({ "kind": "number", "text": l10n::format_number(state, value, pref("format")) }),
-            ),
-            "strikethrough" => {
-                let thin = ((1000.0 / page_width) * page_height) * h < 40.0;
-                merge(
-                    &mut out,
-                    json!({ "kind": "strikethrough", "thin": thin, "color": color.unwrap_or("red") }),
-                );
-            }
-            _ => {
-                let text = wrap(Some(value))
-                    .iter()
-                    .map(crate::api::create::values::ruby_to_s)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                merge(&mut out, json!({ "kind": "text", "text": text }));
-            }
+            merge(&mut out, signature);
         }
-        out
+        "image" | "initials" | "stamp" | "kba" if is_image => {
+            merge(
+                &mut out,
+                json!({ "kind": "image", "src": attachment_url(value_str) }),
+            );
+        }
+        "file" | "payment" | "image" => {
+            let files: Vec<Value> = wrap(Some(value))
+                .iter()
+                .filter_map(|v| {
+                    let (_, blob) = attachments.get(v.as_str()?)?;
+                    Some(json!({
+                        "url": crate::disk::blob_url(state, origin, blob),
+                        "filename": blob.filename,
+                    }))
+                })
+                .collect();
+            merge(&mut out, json!({ "kind": "files", "files": files }));
+        }
+        "checkbox" => merge(
+            &mut out,
+            json!({ "kind": "check", "check_class": check_class }),
+        ),
+        "multiple" | "radio" if area.get("option_uuid").is_some_and(|v| !v.is_null()) => {
+            let options = field.get("options").and_then(Value::as_array);
+            let checked = options
+                .and_then(|options| {
+                    let option = options
+                        .iter()
+                        .find(|o| o.get("uuid") == area.get("option_uuid"))?;
+                    let name = rules::option_name(field, option, "Option");
+                    Some(
+                        wrap(Some(value))
+                            .iter()
+                            .any(|v| v.as_str() == Some(name.as_str())),
+                    )
+                })
+                .unwrap_or(false);
+            merge(
+                &mut out,
+                json!({ "kind": "option", "checked": checked, "check_class": check_class }),
+            );
+        }
+        "cells" if float(area.get("cell_w")) > 0.0 => {
+            let cell_w = float(area.get("cell_w"));
+            let chars: Vec<char> = value_str.chars().collect();
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "cell counts"
+            )]
+            let count = (w / cell_w).ceil() as usize;
+            let cells: Vec<String> = (0..=count)
+                .filter_map(|i| chars.get(i).map(char::to_string))
+                .collect();
+            merge(
+                &mut out,
+                json!({
+                    "kind": "cells",
+                    "cells": cells,
+                    "cell_width": ruby_float(cell_w / w * 100.0),
+                    "justify_end": align == Some("right"),
+                }),
+            );
+        }
+        "date" => {
+            let tz = submitter
+                .and_then(|s| s.timezone.clone())
+                .filter(|t| opts.with_submitter_timezone && !t.trim().is_empty())
+                .unwrap_or_else(|| opts.timezone.to_owned());
+            let text = if value_str == "{{date}}" {
+                l10n::format_date_preview(state, pref("format"), locale, &tz)
+            } else {
+                l10n::format_date_string(
+                    state,
+                    &crate::api::create::values::ruby_to_s(value),
+                    pref("format"),
+                    locale,
+                    &tz,
+                )
+            };
+            merge(&mut out, json!({ "kind": "date", "text": text }));
+        }
+        "number" => merge(
+            &mut out,
+            json!({ "kind": "number", "text": l10n::format_number(state, value, pref("format")) }),
+        ),
+        "strikethrough" => {
+            let thin = ((1000.0 / page_width) * page_height) * h < 40.0;
+            merge(
+                &mut out,
+                json!({ "kind": "strikethrough", "thin": thin, "color": color.unwrap_or("red") }),
+            );
+        }
+        _ => {
+            let text = wrap(Some(value))
+                .iter()
+                .map(crate::api::create::values::ruby_to_s)
+                .collect::<Vec<_>>()
+                .join(", ");
+            merge(&mut out, json!({ "kind": "text", "text": text }));
+        }
     }
+    out
 }
 
 fn merge(target: &mut Value, extra: Value) {
