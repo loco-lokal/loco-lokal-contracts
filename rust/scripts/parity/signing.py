@@ -449,21 +449,29 @@ def run(base, token, template_id, fields):
     return first["submission_id"], steps
 
 
-def run_signed(base, token, template_id, fields):
+# Right-to-left party names and values (Hebrew, Arabic, mixed with Latin and digits),
+# which Rails draws in visual order (`TextUtils.maybe_rtl_reverse`).
+RTL = {"first": "דוד כהן", "second": "سارة أحمد", "full_name": "דוד כהן (מנהל) 2026",
+       "approver": "محمد أحمد 123 - Approved"}
+
+
+def run_signed(base, token, template_id, fields, rtl=False):
     """A submission both parties complete, so its result documents and audit trail are
     signed. Repeated form views make the event log long enough to continue on a second
-    page of the audit trail."""
+    page of the audit trail. With `rtl`, the names and text values are right-to-left."""
     status, created = call(
         RAILS, token, "POST", "/api/submissions",
         {"template_id": template_id, "send_email": False,
-         "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"},
-                        {"role": "Second Party", "email": "bob@example.test", "phone": "+4915112345678"}]},
+         "submitters": [{"role": "First Party", "email": "ana@example.test",
+                         "name": RTL["first"] if rtl else "Ana Example"},
+                        {"role": "Second Party", "email": "bob@example.test", "phone": "+4915112345678",
+                         **({"name": RTL["second"]} if rtl else {})}]},
     )
     assert status == 200, created
     values = {
-        "First Party": [(fields["Full Name"], "Ana Example"), (fields["Start Date"], "2026-03-14"),
-                        (fields["Plan"], "Pro")],
-        "Second Party": [(fields["Approver"], "Bob Approver")],
+        "First Party": [(fields["Full Name"], RTL["full_name"] if rtl else "Ana Example"),
+                        (fields["Start Date"], "2026-03-14"), (fields["Plan"], "Pro")],
+        "Second Party": [(fields["Approver"], RTL["approver"] if rtl else "Bob Approver")],
     }
     signature = {"First Party": "Signature", "Second Party": "Countersignature"}
     for submitter in created:
@@ -535,6 +543,8 @@ def main():
     rust_id, rust = run(RUST, token, template_id, fields)
     signed_ids = (run_signed(RAILS, token, template_id, fields),
                   run_signed(RUST, token, template_id, fields))
+    rtl_ids = (run_signed(RAILS, token, template_id, fields, rtl=True),
+               run_signed(RUST, token, template_id, fields, rtl=True))
     _, found = call(RAILS, token, "GET", "/api/templates?external_id=parity-images")
     images_template_id = found["data"][0]["id"]
     image_ids = (run_images(RAILS, token, images_template_id), run_images(RUST, token, images_template_id))
@@ -571,10 +581,19 @@ def main():
     compare_audit(rails_id, rust_id, "audit trail")
     compare_audit(*signed_ids, "audit trail (signed)")
     compare_audit(*image_ids, "audit trail (images)")
+    a, b = (stored(i) for i in rtl_ids)
+    if a == b:
+        print("ok   stored rows (right-to-left)")
+    else:
+        FAILURES += 1
+        print("FAIL stored rows (right-to-left)")
+        print(diff(a, b))
+    compare_pdfs(*rtl_ids, signed=True)
+    compare_audit(*rtl_ids, "audit trail (right-to-left)")
     if os.environ.get("KEEP"):
-        print("kept", rails_id, rust_id, *signed_ids, *image_ids)
+        print("kept", rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids)
         sys.exit(1 if FAILURES else 0)
-    for submission_id in (rails_id, rust_id, *signed_ids, *image_ids):
+    for submission_id in (rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids):
         call(RAILS, token, "DELETE", f"/api/submissions/{submission_id}")
     sys.exit(1 if FAILURES else 0)
 

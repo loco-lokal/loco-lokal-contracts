@@ -3,6 +3,7 @@
 //! `lib/submitters/`, and `lib/templates/` follow in Phases 3–5.
 
 pub mod ability;
+pub mod bidi;
 pub mod certificates;
 pub mod submit;
 pub mod timezones;

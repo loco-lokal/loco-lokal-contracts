@@ -7,8 +7,8 @@
 //! Two or more image documents are also merged into one more result PDF.
 //!
 //! Not supported yet (the job fails with a "not supported yet" error, so nothing differs
-//! silently): dynamic documents, right-to-left text (Rails reorders it visually), and
-//! forms that need their fields' appearances generated (`NeedAppearances`).
+//! silently): dynamic documents, and forms that need their fields' appearances generated
+//! (`NeedAppearances`).
 //!
 //! With `PDF_FORMAT=pdf/a-3b`, the `:pdfa` task (level 3b) runs as each document is saved.
 
@@ -642,7 +642,13 @@ fn resize(image: &image::DynamicImage, scale: f64) -> image::DynamicImage {
 
 /// `TextUtils::RTL_REGEXP`.
 pub(super) fn is_rtl(text: &str) -> bool {
-    text.chars().any(|c| matches!(u32::from(c), 0x0590..=0x05FF | 0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB1D..=0xFB4F | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF))
+    loco_domain::bidi::is_rtl(text)
+}
+
+/// `TextUtils.maybe_rtl_reverse(text)`: right-to-left text in visual order. Characters
+/// `TwitterCldr` has no data for fail the job, as they raise in Rails.
+pub(super) fn maybe_rtl_reverse(text: &str) -> Result<String, AppError> {
+    loco_domain::bidi::maybe_rtl_reverse(text).map_err(|e| anyhow::anyhow!("{e}").into())
 }
 
 /// `preferences.font_size` (`num.presence&.to_i`).
@@ -863,10 +869,6 @@ async fn fill_area(
         value = field.get("default_value").cloned();
     }
     let value_text = value.as_ref().map(ruby_to_s).unwrap_or_default();
-    // `TextUtils.maybe_rtl_reverse(value)`: the visual reordering is not ported.
-    if is_rtl(&value_text) {
-        return Err(unsupported("Right-to-left text in result documents"));
-    }
     let text_align = match pref_str(field, "align") {
         Some("left") => Align::Left,
         Some("center") => Align::Center,
@@ -1087,14 +1089,10 @@ async fn fill_area(
                 let Some((_, blob)) = ctx.uploads.find(&ruby_to_s(uuid)) else {
                     continue;
                 };
-                // `TextUtils.maybe_rtl_reverse(attachment.filename.to_s)`.
-                if is_rtl(&blob.filename) {
-                    return Err(unsupported("Right-to-left text in result documents"));
-                }
                 linked.push(blob.clone());
                 items.push(Input::Inline(paperclip_box(paperclip, font_size)));
                 items.push(Input::Text(Fragment::new(
-                    &format!("{}\n", blob.filename),
+                    &format!("{}\n", maybe_rtl_reverse(&blob.filename)?),
                     &text_style,
                 )));
             }
@@ -1213,7 +1211,7 @@ async fn fill_area(
             if let Some(mask) = pref(field, "mask").filter(|m| present(Some(m))) {
                 text = crate::email_variables::mask_value(&text, mask);
             }
-            let mut chars: Vec<char> = text.chars().collect();
+            let mut chars: Vec<char> = maybe_rtl_reverse(&text)?.chars().collect();
             let right_aligned = pref_str(field, "align") == Some("right");
             if right_aligned {
                 chars.reverse();
@@ -1312,6 +1310,7 @@ async fn fill_area(
                     .collect::<Vec<_>>()
                     .join(", "),
             };
+            text = maybe_rtl_reverse(&text)?;
             if let Some(mask) = pref(field, "mask").filter(|m| present(Some(m))) {
                 text = crate::email_variables::mask_value(&text, mask);
             }
@@ -1492,11 +1491,7 @@ fn reason_string(
             .filter(|e| !e.is_empty())
             .map(|e| format!(" <{e}>"))
             .unwrap_or_default();
-        let line = format!("{prefix}{reason} {name}{email}");
-        // `TextUtils.maybe_rtl_reverse(reason_line)`.
-        if is_rtl(&line) {
-            return Err(unsupported("Right-to-left text in result documents"));
-        }
+        let line = maybe_rtl_reverse(&format!("{prefix}{reason} {name}{email}"))?;
         Ok(format!("{line}\n{time}"))
     } else {
         Ok(time)
