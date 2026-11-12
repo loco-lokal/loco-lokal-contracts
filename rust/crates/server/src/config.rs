@@ -25,6 +25,11 @@ pub struct Config {
     pub job_concurrency: usize,
     /// `FORCE_SSL`: secure cookies (Rails `config.force_ssl`).
     pub force_ssl: bool,
+    /// `Docuseal.pdf_format`: `PDF_FORMAT`, downcased (`pdf/a-3b` makes PDF/A-3b results).
+    pub pdf_format: String,
+    /// `Docuseal::CERTS`: the `CERTS` JSON object (PEM `cert`, `key`, `sub_ca`, `root_ca`,
+    /// and `enabled`), which replaces the accounts' signing certificates when not empty.
+    pub certs: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Config {
@@ -71,6 +76,10 @@ impl Config {
                 .map_or(Ok(5), |n| n.parse())
                 .context("invalid JOB_CONCURRENCY")?,
             force_ssl: var("FORCE_SSL").is_some_and(|v| v != "false"),
+            pdf_format: var("PDF_FORMAT").unwrap_or_default().to_lowercase(),
+            certs: std::env::var("CERTS").map_or(Ok(serde_json::Map::new()), |v| {
+                serde_json::from_str(&v).context("invalid CERTS")
+            })?,
         })
     }
 }

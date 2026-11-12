@@ -74,6 +74,7 @@ The server reads the same variables as Rails:
 - Storage: `S3_ATTACHMENTS_BUCKET`/`AWS_*`/`S3_ENDPOINT`, `GCS_*`, `AZURE_*`. Without any of these, files go to `$WORKDIR/attachments`; in production the stored storage settings apply instead.
 - Mail: `SMTP_*`, including `SMTP_FROM`. Without these, the stored SMTP settings apply; with neither, mail is discarded.
 - `RAILS_ENV=production`, which turns off template and asset-manifest reloading.
+- `PDF_FORMAT` (`pdf/a-3b` for PDF/A-3b result documents and audit trails) and `CERTS` (signing certificates that replace the accounts' own).
 
 It also reads these, which Rails doesn't use:
 
@@ -112,7 +113,8 @@ cd rust/scripts/parity
 ./compare.py "$PARITY_TOKEN" GET /api/templates GET /api/submissions   # reads: method/path pairs, optional JSON body
 ./writes.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # template clone/update/archive, submission update/archive
 ./create.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # submission create modes and errors, submitter updates; compares stored rows
-./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs, audit trail
+./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs (also of the two-image template and with right-to-left text), audit trail
+./signing_configs.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # signed results and audit trails with timestamp servers and custom certificates
 ./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined, next-party, completed, delegation and copy emails via Mailpit, email_events rows
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
@@ -120,6 +122,8 @@ cd rust/scripts/parity
 ```
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
+
+`signing_configs.py` stores each signing setting through the `rails` service and restores it afterwards. Its timestamp server (`openssl ts -reply`) listens on `TSA_HOST:TSA_PORT` (default `HOOK_HOST` or 127.0.0.1, port 4598), which both servers must reach. To check PDF/A output, start both servers with `PDF_FORMAT=pdf/a-3b` and run `signing.py` again; it compares the XMP metadata and output intents of the result documents and audit trails.
 
 ## Status
 
@@ -151,7 +155,7 @@ Phase 4c adds the audit trail and the completed emails:
 - `loco_pdf::edit::compose` is the part of HexaPDF's composer the audit trail uses: frames with floats, text and image boxes, rules, column and table boxes that split across pages.
 - `signing/emails.rs` sends `SubmitterMailer#completed_email` to the sender and the BCC addresses, and `#documents_copy_email` to the parties, with the result documents, the audit trail and uploaded files attached (up to 10 MB, `document_filename_format` applied).
 
-`signing.py` compares the audit trails word by word (positions to 0.01 pt; ids, checksums and addresses may differ in text only), as rendered pages, by metadata and by signature. Saved documents carry HexaPDF's `Producer` and its zone-less UTC dates, as the Rails documents do.
+`signing.py` compares the audit trails word by word (positions to 0.01 pt; ids, checksums and addresses may differ in text only), as rendered pages (with those words blanked), by metadata and by signature. It compares the words, metadata and signatures of the result PDFs too. Saved documents carry HexaPDF's `Producer` and its zone-less UTC dates, as the Rails documents do.
 
 The rest of Phase 4 adds the links around the signing form:
 
@@ -164,17 +168,22 @@ The rest of Phase 4 adds the links around the signing form:
 
 `downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
 
+Result documents and their signatures, continued (issue #5):
+
+- Two or more image documents are also merged into one more result PDF named after the submission, with the pages of the signed image PDFs (and so their signature fields) as HexaPDF imports them (`Editor::merge`).
+- `PDF_FORMAT=pdf/a-3b` makes results and audit trails PDF/A-3b (`loco_pdf::edit::pdfa`): HexaPDF's XMP metadata from the information dictionary, the sRGB output intent, and the rebuilt `hmtx` tables of the TrueType fonts in loaded documents (`fix_glyph_widths`). The audit trail's level 3u uses the same code.
+- Timestamp servers (`signing/timestamp.rs`, `Submissions::TimestampHandler`): each signature carries the server's RFC 3161 token, with the fallback after a comma and basic-auth credentials from the URL. A failed request embeds the current time instead, as in Rails.
+- Custom signing certificates: the PKCS#12 file selected as the default (with OpenSSL's choice of key and certificate), and the `CERTS` environment variable.
+- A later party's fonts and images no longer reuse the resource names of an earlier party's. That replaced the earlier text and signature images in multi-party results.
+- Right-to-left text (`loco_domain::bidi`, `TextUtils.maybe_rtl_reverse`) in result documents and the audit trail: Arabic letters in their presentation forms (`ArabicLetterConnector`), then TwitterCldr's own Bidi algorithm with its quirks, and right alignment where Rails uses it. The bidi classes and the `RTL_REGEXP` code points come from Rails (`scripts/dump-bidi-classes.sh`, which also refreshes the test fixture of Rails' output for sample texts).
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
   - dynamic documents;
-  - two or more image documents (Rails merges them into one PDF);
-  - custom signing certificates;
-  - timestamp servers;
-  - PDF/A output.
-- Right-to-left text is drawn in logical order, where Rails reorders it visually.
-- Form fields that need their appearances generated (`NeedAppearances`) are left unflattened.
-- Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet", as does right-to-left text in the audit trail and a timestamp server for its signature.
+  - forms that need their field appearances generated (`NeedAppearances`);
+  - signing with the `docuseal_aatl` certificate without `CERTS`, with a certificate without its private key, or with a non-RSA key.
+- Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet".
 - Email two-factor verification: sending and checking codes on the signing form and the share link (`shared_link_2fa`, reopening a pending party without the start form cookie, `?email_verification`) answers 422. A valid `email_2fa_slug` cookie or two-factor token is accepted.
 - Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission) answer 422.
 - The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).

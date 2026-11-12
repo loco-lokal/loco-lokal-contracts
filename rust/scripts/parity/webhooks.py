@@ -56,7 +56,8 @@ def rails_runner(code):
         ["docker", "compose", "-f", "compose.rust-dev.yml", "exec", "-T", "-w", "/app", "rails",
          "bin/rails", "runner", code],
         cwd=ROOT, check=True, capture_output=True, text=True)
-    return out.stdout.strip().splitlines()[-1]
+    lines = out.stdout.strip().splitlines()
+    return lines[-1] if lines else ""
 
 
 def psql(sql):

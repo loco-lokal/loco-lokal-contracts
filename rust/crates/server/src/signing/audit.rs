@@ -17,6 +17,7 @@ use loco_pdf::edit::{
     compose::{BoxStyle, ColumnBox, Composer, Content, ImageBox, Quad, RuleBox, TableBox, TextBox},
     fonts::FontData,
     layout::{Align, Fragment, Input, Layouter, TextStyle, Valign},
+    pdfa::Pdfa,
 };
 use loco_storage::{Attachment, Blob};
 use serde_json::{Value, json};
@@ -24,11 +25,12 @@ use serde_json::{Value, json};
 use super::{
     Form,
     results::{
-        FONT_BOLD_NAME, FONT_NAME, SIGN_REASON, TESTING_FOOTER, TIMESTAMP_SERVER_URL_KEY,
+        FONT_BOLD_NAME, FONT_NAME, PDF_A_3B, SIGN_REASON, Signer, TESTING_FOOTER,
         UNSUPPORTED_IMAGE_TYPES, Uploads, WITH_FILE_LINKS_KEY, WITH_SIGNATURE_ID,
         WITH_SUBMITTER_TIMEZONE_KEY, WITH_TIMESTAMP_SECONDS_KEY, default_font, is_rtl,
-        load_signing_key, ruby_to_s, unsupported, wrap,
+        load_signing_key, maybe_rtl_reverse, ruby_to_s, save_document, unsupported, wrap,
     },
+    timestamp::TimestampHandler,
 };
 use crate::{errors::AppError, state::AppState};
 
@@ -47,7 +49,6 @@ const US_TIMEZONES: &[&str] = &[
 const A4: (f64, f64) = (595.275_591, 841.889_764);
 const LETTER: (f64, f64) = (612.0, 792.0);
 const LOGO_PNG: &[u8] = include_bytes!("../../../../../lib/pdf_icons/logo.png");
-const SRGB_ICC: &[u8] = include_bytes!("../../../../data/icc/sRGB2014.icc");
 
 const WITH_AUDIT_VALUES_KEY: &str = "with_audit_values";
 const WITH_AUDIT_SENDER_KEY: &str = "with_audit_sender";
@@ -191,13 +192,13 @@ impl Configs {
     }
 }
 
-/// `TextUtils.maybe_rtl_reverse`: right-to-left text needs a Bidi reordering that is not
-/// ported, so it fails the job instead of drawing differently.
-fn ltr(text: &str) -> Result<String, AppError> {
+/// `text_align: text.match?(RTL_REGEXP) ? :right : :left`.
+fn rtl_align(text: &str) -> Align {
     if is_rtl(text) {
-        return Err(unsupported("Right-to-left text in the audit trail"));
+        Align::Right
+    } else {
+        Align::Left
     }
-    Ok(text.to_owned())
 }
 
 /// `String#squish`.
@@ -453,43 +454,36 @@ async fn generate(state: &AppState, submission_id: i64) -> Result<(Attachment, B
         uploads,
     };
 
-    let key = load_signing_key(state, data.form.account.id).await?;
-    if key.is_some()
-        && signing::encrypted_config_with_fallback(
-            &state.db,
-            data.form.account.id,
-            TIMESTAMP_SERVER_URL_KEY,
-        )
-        .await?
-        .and_then(|v| state.secrets.encryptor.decrypt(&v).ok())
-        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
-        .is_some_and(|v| present(Some(&v)))
-    {
-        return Err(unsupported(
-            "Timestamping signatures with a timestamp server",
-        ));
-    }
+    // `build_signing_params(last_submitter, pkcs, tsa_url)`.
+    let signer = match load_signing_key(state, data.form.account.id).await? {
+        Some(key) => Some(Signer {
+            reason: SIGN_REASON.to_owned(),
+            key: Arc::new(key),
+            timestamp: TimestampHandler::load(state, data.form.account.id)
+                .await?
+                .map(Arc::new),
+        }),
+        None => None,
+    };
 
     let mut editor = Editor::blank().map_err(pdf_error)?;
     build(&mut data, &mut editor).await?;
 
-    let now = Utc::now();
     editor.set_info_text("Creator", "DocuSeal (https://www.docuseal.com)");
-    if default_font() == FONT_NAME {
-        add_pdfa(&mut editor, now).map_err(pdf_error)?;
+    // `composer.document.task(:pdfa, level: '3b')` with `PDF_FORMAT=pdf/a-3b`, else level
+    // 3u when GoNoto is available.
+    if state.config.pdf_format == PDF_A_3B {
+        editor.set_pdfa(Pdfa {
+            conformance: 'B',
+            fix_glyph_widths: false,
+        });
+    } else if default_font() == FONT_NAME {
+        editor.set_pdfa(Pdfa {
+            conformance: 'U',
+            fix_glyph_widths: false,
+        });
     }
-    let pdf_date = now.format("D:%Y%m%d%H%M%S").to_string();
-    let bytes = match &key {
-        Some(key) => editor
-            .save_signed(
-                &pdf_date,
-                &now.format("%Y%m%d%H%M%S").to_string(),
-                SIGN_REASON,
-                key,
-            )
-            .map_err(pdf_error)?,
-        None => editor.save(&pdf_date).map_err(pdf_error)?,
-    };
+    let bytes = save_document(editor, signer.as_ref()).await?;
 
     let name = data
         .form
@@ -512,62 +506,6 @@ async fn generate(state: &AppState, submission_id: i64) -> Result<(Attachment, B
     let attachment =
         Attachment::create(&state.db, "Submission", submission_id, "audit_trail", &blob).await?;
     Ok((attachment, blob))
-}
-
-/// The `:pdfa` task (level 3u): XMP metadata and the sRGB output intent.
-fn add_pdfa(editor: &mut Editor, now: chrono::DateTime<Utc>) -> Result<(), EditError> {
-    use loco_pdf::edit::lopdf::{Dictionary, Object, Stream};
-    let packet_id = uuid::Uuid::new_v4().simple().to_string();
-    let xmp = format!(
-        "<?xpacket begin=\"\u{feff}\" id=\"{packet_id}\"?>\n\
-         <x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n\
-         <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
-         <rdf:Description rdf:about=\"\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\">\n\
-         <xmp:CreatorTool>DocuSeal (https://www.docuseal.com)</xmp:CreatorTool>\n\
-         <xmp:ModifyDate>{}</xmp:ModifyDate>\n\
-         </rdf:Description>\n\
-         <rdf:Description rdf:about=\"\" xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\">\n\
-         <pdfaid:part>3</pdfaid:part>\n\
-         <pdfaid:conformance>U</pdfaid:conformance>\n\
-         </rdf:Description>\n\
-         <rdf:Description rdf:about=\"\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\">\n\
-         <pdf:Producer>{}</pdf:Producer>\n\
-         </rdf:Description>\n\
-         </rdf:RDF>\n\
-         </x:xmpmeta>\n\
-         <?xpacket end=\"r\"?>",
-        now.format("%Y-%m-%dT%H:%M:%S+00:00"),
-        loco_pdf::edit::PRODUCER
-    );
-    let mut meta = Dictionary::new();
-    meta.set("Type", Object::Name(b"Metadata".to_vec()));
-    meta.set("Subtype", Object::Name(b"XML".to_vec()));
-    let metadata = editor.add_object(Object::Stream(
-        Stream::new(meta, xmp.into_bytes()).with_compression(false),
-    ));
-    let mut icc = Dictionary::new();
-    icc.set("N", Object::Integer(3));
-    let profile = editor.add_object(Object::Stream(
-        Stream::new(icc, SRGB_ICC.to_vec()).with_compression(false),
-    ));
-    let mut intent = Dictionary::new();
-    intent.set("S", Object::Name(b"GTS_PDFA1".to_vec()));
-    intent.set(
-        "OutputConditionIdentifier",
-        Object::string_literal("sRGB2014.icc"),
-    );
-    intent.set("Info", Object::string_literal("sRGB2014.icc"));
-    intent.set(
-        "RegistryName",
-        Object::string_literal("https://www.color.org"),
-    );
-    intent.set("DestOutputProfile", Object::Reference(profile));
-    let intent = editor.add_object(Object::Dictionary(intent));
-    editor.set_catalog(
-        "OutputIntents",
-        Object::Array(vec![Object::Reference(intent)]),
-    )?;
-    editor.set_catalog("Metadata", Object::Reference(metadata))
 }
 
 /// `build_audit_trail(submission)`: lays the document out.
@@ -720,7 +658,7 @@ async fn build(data: &mut Data<'_>, editor: &mut Editor) -> Result<(), AppError>
             .join("\n");
         rows.push(vec![
             Some(styles.text(
-                vec![Piece::Regular(ltr(&blob.filename)?)],
+                vec![Piece::Regular(maybe_rtl_reverse(&blob.filename)?)],
                 FONT_SIZE,
                 1.0,
                 Align::Left,
@@ -916,14 +854,14 @@ async fn submitter_boxes(
     if roles > 1 {
         contact.push(Piece::Regular(format!(
             "{}\n",
-            ltr(&item.get("name").map(ruby_to_s).unwrap_or_default())?
+            maybe_rtl_reverse(&item.get("name").map(ruby_to_s).unwrap_or_default())?
         )));
     }
     if let Some(email) = &submitter.email {
         contact.push(Piece::Bold(format!("{email}\n")));
     }
     if let Some(name) = &submitter.name {
-        contact.push(Piece::Regular(format!("{}\n", ltr(name)?)));
+        contact.push(Piece::Regular(format!("{}\n", maybe_rtl_reverse(name)?)));
     }
     if let Some(phone) = &submitter.phone {
         contact.push(Piece::Regular(format!("{phone}\n")));
@@ -1119,7 +1057,7 @@ async fn submitter_boxes(
         }
 
         let label = {
-            let upper = ltr(&field_name)?.to_uppercase();
+            let upper = maybe_rtl_reverse(&field_name)?.to_uppercase();
             if upper.trim().is_empty() {
                 format!("{} {}", data.t(&format!("{kind}_field")), counters[&kind]).to_uppercase()
             } else {
@@ -1130,7 +1068,7 @@ async fn submitter_boxes(
             vec![Piece::Regular(label)],
             6.0,
             1.3,
-            Align::Left,
+            rtl_align(&field_name),
             padding(0.0, 0.0, 2.0, 0.0),
         ));
 
@@ -1218,7 +1156,7 @@ async fn submitter_boxes(
                     format!("{}/e/{}", state.default_url(), data.form.submission.slug)
                 };
                 links.push(Piece::Link {
-                    text: format!("{}\n", ltr(&blob.filename)?),
+                    text: format!("{}\n", maybe_rtl_reverse(&blob.filename)?),
                     uri,
                 });
             }
@@ -1264,16 +1202,18 @@ async fn submitter_boxes(
             {
                 text = crate::email_variables::mask_value(&text, mask);
             }
-            let text = if text.is_empty() {
+            // `value.to_s.presence || 'n/a'`, aligned right when the value is right-to-left.
+            let align = rtl_align(&text);
+            let text = if text.chars().all(char::is_whitespace) {
                 "n/a".to_owned()
             } else {
-                ltr(&text)?
+                maybe_rtl_reverse(&text)?
             };
             boxes.push(styles.text(
                 vec![Piece::Regular(text)],
                 FONT_SIZE,
                 1.0,
-                Align::Left,
+                align,
                 padding(0.0, 0.0, 10.0, 0.0),
             ));
         }
@@ -1331,7 +1271,7 @@ async fn event_rows(
             .flatten()
             .next()
         };
-        let submitter_name = ltr(&squish(name.unwrap_or_default()))?;
+        let submitter_name = maybe_rtl_reverse(&squish(name.unwrap_or_default()))?;
         let names = || ("submitter_name", submitter_name.clone());
         let invited = (kind == "invite_party")
             .then(|| {
@@ -1366,7 +1306,10 @@ async fn event_rows(
         } else if let Some(invited) = invited {
             data.t_with(
                 "submission_event_names.invite_party_by_html",
-                &[("invited_submitter_name", ltr(&invited)?), names()],
+                &[
+                    ("invited_submitter_name", maybe_rtl_reverse(&invited)?),
+                    names(),
+                ],
             )
         } else if data.configs.with_audit_sender && (kind == "send_email" || kind == "send_sms") {
             let user = match created_by {
@@ -1388,7 +1331,7 @@ async fn event_rows(
                     &[names()]
                 ),
                 data.t("from"),
-                ltr(&squish(&full_name))?,
+                maybe_rtl_reverse(&squish(&full_name))?,
                 user.email
             )
         } else if kind == "delegate_form" {
@@ -1408,7 +1351,7 @@ async fn event_rows(
             data.t_with(
                 "submission_event_names.delegate_form_by_html",
                 &[
-                    ("from", ltr(&squish(&from))?),
+                    ("from", maybe_rtl_reverse(&squish(&from))?),
                     (
                         "to",
                         event_data.get("email").map(ruby_to_s).unwrap_or_default(),
