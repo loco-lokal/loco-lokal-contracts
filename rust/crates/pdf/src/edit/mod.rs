@@ -2,12 +2,14 @@
 //! HexaPDF: page overlays with text and images, rotation and annotation flattening, link
 //! annotations, document info, and saving as an incremental update (optionally signed).
 
+pub mod appearances;
 pub mod canvas;
 mod colors;
 pub mod compose;
 pub mod fonts;
 mod glyph_names;
 pub mod layout;
+pub mod pdfa;
 pub mod sign;
 mod writer;
 
@@ -73,6 +75,11 @@ pub struct Editor {
     image_keys: HashMap<String, ImageInfo>,
     overlays: BTreeMap<ObjectId, Canvas>,
     uses: BTreeMap<ObjectId, PageUse>,
+    /// The `:pdfa` task, run when the document is saved.
+    pdfa: Option<pdfa::Pdfa>,
+    /// Added fonts and images are named `DSF{n}` and `DSI{n}` from this number on, past the
+    /// names an earlier save used, so that a later party's resources never replace them.
+    name_base: usize,
     /// Problems that were skipped, as `maybe_flatten_pdf` logs and continues.
     pub warnings: Vec<String>,
 }
@@ -89,6 +96,13 @@ impl Editor {
         if doc.trailer.has(b"Encrypt") {
             return Err(EditError::Unsupported("editing encrypted PDFs"));
         }
+        let name_base = doc
+            .objects
+            .values()
+            .map(max_resource_number)
+            .max()
+            .flatten()
+            .map_or(0, |n| n + 1);
         Ok(Self {
             original: bytes,
             doc,
@@ -99,6 +113,8 @@ impl Editor {
             image_keys: HashMap::new(),
             overlays: BTreeMap::new(),
             uses: BTreeMap::new(),
+            pdfa: None,
+            name_base,
             warnings: Vec::new(),
         })
     }
@@ -158,6 +174,61 @@ impl Editor {
         doc.trailer.set("Root", Object::Reference(catalog_id));
         let mut bytes = Vec::new();
         doc.save_to(&mut bytes)
+            .map_err(|e| EditError::Invalid(e.to_string()))?;
+        Self::load(bytes)
+    }
+
+    /// A new document with the pages of `sources` (`HexaPDF::Document.new` and
+    /// `doc.pages << doc.import(page)` for each page), written out in full and read back.
+    /// Pages are copied with everything they reference, as `HexaPDF::Importer` does:
+    /// references to a catalog or page tree node become null, and inherited attributes are
+    /// copied onto the page.
+    pub fn merge(sources: &[&[u8]], now: &str) -> Result<Self, EditError> {
+        let mut merged = Self::blank()?;
+        let pages_id = merged
+            .catalog()
+            .and_then(|c| c.get(b"Pages").ok())
+            .and_then(|p| p.as_reference().ok())
+            .ok_or_else(|| EditError::Invalid("no page tree".to_owned()))?;
+        let mut kids = Vec::new();
+        for bytes in sources {
+            let source = Document::load_mem(bytes)?;
+            let mut importer = Importer {
+                source: &source,
+                map: HashMap::new(),
+            };
+            for page in source.get_pages().into_values() {
+                let Some(id) = importer.import(page, &mut merged) else {
+                    continue;
+                };
+                if let Some(dict) = merged.dict_mut(id) {
+                    dict.set("Parent", Object::Reference(pages_id));
+                }
+                kids.push(Object::Reference(id));
+            }
+        }
+        if let Some(pages) = merged.dict_mut(pages_id) {
+            pages.set(
+                "Count",
+                Object::Integer(i64::try_from(kids.len()).unwrap_or(0)),
+            );
+            pages.set("Kids", Object::Array(kids));
+        }
+        merged.rewrite(now)
+    }
+
+    /// `pdf.write(io)` and `HexaPDF::Document.new(io:)` (`normalize_image_pdf`): the document
+    /// with its changes, written out in full (`ModDate` set to `now`) and read back.
+    pub fn rewrite(mut self, now: &str) -> Result<Self, EditError> {
+        self.finish()?;
+        self.update_id();
+        self.set_info("ModDate", pdf_date(now));
+        self.set_info_text("Producer", PRODUCER);
+        self.doc.trailer.remove(b"Prev");
+        self.doc.trailer.remove(b"XRefStm");
+        let mut bytes = Vec::new();
+        self.doc
+            .save_to(&mut bytes)
             .map_err(|e| EditError::Invalid(e.to_string()))?;
         Self::load(bytes)
     }
@@ -754,6 +825,19 @@ impl Editor {
         }
     }
 
+    /// `pdf.acro_form[:NeedAppearances]`: the form asks for its fields' appearances to be
+    /// generated, which `maybe_flatten_pdf` does (`create_appearances(force: true)`) before
+    /// flattening.
+    #[must_use]
+    pub fn needs_appearances(&self) -> bool {
+        let form = self
+            .catalog()
+            .and_then(|c| c.get(b"AcroForm").ok())
+            .and_then(|f| self.resolve(f).as_dict().ok());
+        form.and_then(|f| f.get(b"NeedAppearances").ok())
+            .is_some_and(|v| !matches!(self.resolve(v), Object::Boolean(false) | Object::Null))
+    }
+
     /// `maybe_flatten_pdf`: flattens the interactive form's widgets that have appearances
     /// and removes the form when nothing is left.
     pub fn flatten_form(&mut self) {
@@ -777,17 +861,6 @@ impl Editor {
         else {
             return;
         };
-        if form
-            .get(b"NeedAppearances")
-            .ok()
-            .and_then(|v| v.as_bool().ok())
-            == Some(true)
-        {
-            self.warnings.push(
-                "form fields without appearances (NeedAppearances) were left unflattened"
-                    .to_owned(),
-            );
-        }
         let mut widgets = BTreeSet::new();
         let mut stack: Vec<ObjectId> = form
             .get(b"Fields")
@@ -852,14 +925,17 @@ impl Editor {
     ) -> Result<(Arc<FontData>, String), EditError> {
         let key = format!("{family}/{variant}");
         if let Some(&index) = self.font_index.get(&key) {
-            return Ok((self.fonts[index].font.clone(), format!("DSF{index}")));
+            return Ok((
+                self.fonts[index].font.clone(),
+                format!("DSF{}", self.name_base + index),
+            ));
         }
         let font = fonts::load(family, variant)?;
         let id = self.next_id();
         let index = self.fonts.len();
         self.fonts.push(UsedFont::new(font.clone(), id));
         self.font_index.insert(key, index);
-        Ok((font, format!("DSF{index}")))
+        Ok((font, format!("DSF{}", self.name_base + index)))
     }
 
     /// Draws laid-out text on a page's overlay, with link annotations for linked text.
@@ -871,6 +947,7 @@ impl Editor {
             fonts: &mut self.fonts,
             images: &self.images,
             used: use_,
+            name_base: self.name_base,
         };
         let links = canvas.draw(fitted, x, y, &mut resources);
         self.overlays.insert(page, canvas);
@@ -918,7 +995,7 @@ impl Editor {
     /// Marks an image as used on a page and returns its resource name.
     pub fn use_image(&mut self, page: ObjectId, index: usize) -> String {
         self.uses.entry(page).or_default().images.insert(index);
-        format!("DSI{index}")
+        format!("DSI{}", self.name_base + index)
     }
 
     /// An image registered once under `key` (the check and paperclip icons).
@@ -1114,13 +1191,18 @@ impl Editor {
             let fonts = used
                 .fonts
                 .iter()
-                .map(|i| (format!("DSF{i}"), self.fonts[*i].object_id))
+                .map(|i| {
+                    (
+                        format!("DSF{}", self.name_base + i),
+                        self.fonts[*i].object_id,
+                    )
+                })
                 .collect();
             sub(&mut resources, "Font", fonts, self);
             let mut xobjects: Vec<(String, ObjectId)> = used
                 .images
                 .iter()
-                .map(|i| (format!("DSI{i}"), self.images[*i].id))
+                .map(|i| (format!("DSI{}", self.name_base + i), self.images[*i].id))
                 .collect();
             xobjects.extend(used.forms);
             sub(&mut resources, "XObject", xobjects, self);
@@ -1173,17 +1255,24 @@ impl Editor {
 
     /// `pdf.sign(io, reason:, certificate:, key:, certificate_chain:)`: an incremental
     /// update adding a signature field, signed over the whole file. `now` is the PDF date
-    /// and `signing_time` the UTC `YYYYMMDDHHMMSS` time.
+    /// and `signing_time` the UTC `YYYYMMDDHHMMSS` time. With `timestamp`
+    /// (`timestamp_handler:`), the signature carries a timestamp token and has
+    /// `signature_size: 20_000`.
     pub fn save_signed(
         mut self,
         now: &str,
         signing_time: &str,
         reason: &str,
         key: &sign::SigningKey,
+        timestamp: Option<sign::Timestamper<'_>>,
     ) -> Result<Vec<u8>, EditError> {
         const PLACEHOLDER: &[u8] = b"/ByteRange[0 1000000000000 1000000000000 1000000000000]";
         let utc = sign::utc_time(signing_time);
-        let size = sign::signed_data(b"", key, &utc)?.len() + 5;
+        let size = if timestamp.is_some() {
+            20_000
+        } else {
+            sign::signed_data(b"", key, &utc, None)?.len() + 5
+        };
         let first_page = *self
             .page_ids()
             .first()
@@ -1285,7 +1374,7 @@ impl Editor {
 
         let mut signed = bytes[..contents_offset].to_vec();
         signed.extend_from_slice(&bytes[offset2..]);
-        let der = sign::signed_data(&signed, key, &utc)?;
+        let der = sign::signed_data(&signed, key, &utc, timestamp)?;
         if der.len() > size {
             return Err(EditError::Sign(
                 "signature larger than its placeholder".to_owned(),
@@ -1305,6 +1394,9 @@ impl Editor {
         self.finish()?;
         self.update_id();
         self.set_info("ModDate", pdf_date(now));
+        if let Some(pdfa) = self.pdfa.take() {
+            self.apply_pdfa(pdfa)?;
+        }
         self.set_info_text("Producer", PRODUCER);
         let objects: Vec<(ObjectId, &Object)> = self
             .dirty
@@ -1324,24 +1416,141 @@ impl Editor {
     }
 }
 
+/// `HexaPDF::Importer`: copies objects of `source` into another document, each once.
+struct Importer<'a> {
+    source: &'a Document,
+    /// Source ids to their copies; `None` for objects imported as null.
+    map: HashMap<ObjectId, Option<ObjectId>>,
+}
+
+/// `Page::INHERITABLE_FIELDS`.
+const INHERITABLE: [&[u8]; 4] = [b"Resources", b"MediaBox", b"CropBox", b"Rotate"];
+
+impl Importer<'_> {
+    /// The copy of the indirect object `id`, or `None` when it is missing, a catalog or a
+    /// page tree node.
+    fn import(&mut self, id: ObjectId, into: &mut Editor) -> Option<ObjectId> {
+        if let Some(mapped) = self.map.get(&id) {
+            return *mapped;
+        }
+        let Ok(object) = self.source.get_object(id) else {
+            self.map.insert(id, None);
+            return None;
+        };
+        let kind = match object {
+            Object::Dictionary(d) => d.get(b"Type").ok(),
+            Object::Stream(s) => s.dict.get(b"Type").ok(),
+            _ => None,
+        }
+        .and_then(|t| t.as_name().ok());
+        if matches!(kind, Some(b"Catalog" | b"Pages")) {
+            self.map.insert(id, None);
+            return None;
+        }
+        let new_id = into.next_id();
+        self.map.insert(id, Some(new_id));
+        let mut copy = self.duplicate(object, into);
+        if kind == Some(b"Page")
+            && let Object::Dictionary(dict) = &mut copy
+        {
+            for key in INHERITABLE {
+                if dict.has(key) {
+                    continue;
+                }
+                if let Some(value) = self.inherited(id, key) {
+                    let value = self.duplicate(&value, into);
+                    dict.set(key, value);
+                }
+            }
+        }
+        into.doc.objects.insert(new_id, copy);
+        into.dirty.insert(new_id);
+        Some(new_id)
+    }
+
+    fn duplicate(&mut self, object: &Object, into: &mut Editor) -> Object {
+        match object {
+            Object::Reference(id) => self
+                .import(*id, into)
+                .map_or(Object::Null, Object::Reference),
+            Object::Array(items) => {
+                Object::Array(items.iter().map(|v| self.duplicate(v, into)).collect())
+            }
+            Object::Dictionary(dict) => Object::Dictionary(self.duplicate_dict(dict, into)),
+            Object::Stream(stream) => {
+                let mut copy = stream.clone();
+                copy.dict = self.duplicate_dict(&stream.dict, into);
+                Object::Stream(copy)
+            }
+            other => other.clone(),
+        }
+    }
+
+    fn duplicate_dict(&mut self, dict: &Dictionary, into: &mut Editor) -> Dictionary {
+        let mut copy = Dictionary::new();
+        for (key, value) in dict {
+            copy.set(key.clone(), self.duplicate(value, into));
+        }
+        copy
+    }
+
+    /// An inheritable attribute from the page's ancestors in the source document.
+    fn inherited(&self, page: ObjectId, key: &[u8]) -> Option<Object> {
+        let mut current = self.source.get_dictionary(page).ok()?;
+        for _ in 0..64 {
+            let parent = current.get(b"Parent").ok()?.as_reference().ok()?;
+            current = self.source.get_dictionary(parent).ok()?;
+            if let Ok(value) = current.get(key) {
+                return Some(value.clone());
+            }
+        }
+        None
+    }
+}
+
 /// Font and image lookups for one page's overlay.
 struct PageResources<'a> {
     fonts: &'a mut Vec<UsedFont>,
     images: &'a [ImageEntry],
     used: &'a mut PageUse,
+    name_base: usize,
 }
 
 impl canvas::Resources for PageResources<'_> {
     fn encode(&mut self, font_key: &str, glyphs: &[Glyph]) -> Object {
-        let index: usize = font_key.trim_start_matches("DSF").parse().unwrap_or(0);
+        let number: usize = font_key.trim_start_matches("DSF").parse().unwrap_or(0);
+        let index = number.saturating_sub(self.name_base);
         self.used.fonts.insert(index);
         self.fonts[index].encode(glyphs)
     }
 
     fn image(&self, image: usize) -> String {
         let _ = self.images;
-        format!("DSI{image}")
+        format!("DSI{}", self.name_base + image)
     }
+}
+
+/// The highest `n` of a `DSF{n}` or `DSI{n}` key in the object or the dictionaries in it.
+fn max_resource_number(object: &Object) -> Option<usize> {
+    match object {
+        Object::Dictionary(dict) => dict_max_resource_number(dict),
+        Object::Stream(stream) => dict_max_resource_number(&stream.dict),
+        Object::Array(items) => items.iter().filter_map(max_resource_number).max(),
+        _ => None,
+    }
+}
+
+fn dict_max_resource_number(dict: &Dictionary) -> Option<usize> {
+    dict.iter()
+        .filter_map(|(key, value)| {
+            let own = key
+                .strip_prefix(b"DSF")
+                .or_else(|| key.strip_prefix(b"DSI"))
+                .and_then(|n| std::str::from_utf8(n).ok())
+                .and_then(|n| n.parse::<usize>().ok());
+            own.max(max_resource_number(value))
+        })
+        .max()
 }
 
 fn number(object: &Object) -> Option<f64> {

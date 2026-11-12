@@ -201,6 +201,12 @@ impl Line {
         }
     }
 
+    /// `Line.new(fragments)`: a line of the fragments as they are, not laid out.
+    #[must_use]
+    pub fn of(fragments: Vec<Fragment>) -> Self {
+        Self::new(fragments.into_iter().map(LineItem::Text).collect())
+    }
+
     #[must_use]
     pub fn width(&self) -> f64 {
         self.items.iter().map(LineItem::width).sum()

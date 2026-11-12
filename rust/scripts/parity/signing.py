@@ -165,7 +165,7 @@ def stored(submission_id):
            attachments: e.attachments.map {{ |a| [a.name, a.blob.content_type, a.blob.metadata.except('sha256')] }},
            events: e.submission_events.order(:id).map {{ |ev| [ev.event_type, ev.data.keys.sort] }},
            completed_submitters: CompletedSubmitter.where(submitter_id: e.id).count,
-           result_documents: e.documents.map {{ |d| [d.filename.to_s, d.content_type, d.metadata.keys.sort] }},
+           result_documents: e.documents.map {{ |d| [d.filename.to_s, d.content_type, d.metadata.keys.sort, d.metadata['original_uuid']] }},
            completed_documents: CompletedDocument.where(submitter_id: e.id).count }}
       end
       audit = s.audit_trail.attached? && [s.audit_trail.filename.to_s, s.audit_trail.content_type, s.audit_trail.metadata]
@@ -218,32 +218,51 @@ def render(pdf):
         return [Image.open(p).convert("L").copy() for p in sorted(Path(tmp).glob("page*.png"))]
 
 
+def der_element(data):
+    """The first DER element of `data`, without the zero padding after it (a signature's
+    own bytes may end in zeros, so the padding cannot just be stripped)."""
+    length, header = data[1], 2
+    if length & 0x80:
+        count = length & 0x7F
+        length, header = int.from_bytes(data[2:2 + count], "big"), 2 + count
+    return data[:header + length]
+
+
 def signatures(pdf):
-    """The number of signatures and how many verify. pdfsig's NSS cannot read the DocuSeal
-    certificate chain and reports even Rails' signatures as invalid, so each signature is
-    checked with `openssl cms -verify` over its byte ranges (chain trust not checked)."""
+    """The number of signatures, how many verify, and whether the one covering the whole file
+    verifies. pdfsig's NSS cannot read the DocuSeal certificate chain and reports even Rails'
+    signatures as invalid, so each signature is checked with `openssl cms -verify` over its
+    byte ranges (chain trust not checked). A merged image PDF also carries the signatures of
+    the PDFs it was merged from, which do not cover it."""
     found = valid = 0
+    whole = False
     for match in re.finditer(rb"/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]", pdf):
         a, b, c, d = map(int, match.groups())
         if b == 1000000000000:  # an unfilled placeholder
             continue
         found += 1
         contents = pdf[a + b:c].strip().strip(b"<>")
+        if c + d > len(pdf) or not re.fullmatch(rb"[0-9a-fA-F]*", contents):
+            continue  # byte ranges of another file
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "data").write_bytes(pdf[a:a + b] + pdf[c:c + d])
-            Path(tmp, "sig").write_bytes(bytes.fromhex(contents.decode()).rstrip(b"\0"))
+            Path(tmp, "sig").write_bytes(der_element(bytes.fromhex(contents.decode())))
             result = subprocess.run(
                 ["openssl", "cms", "-verify", "-binary", "-noverify", "-inform", "DER",
                  "-in", str(Path(tmp, "sig")), "-content", str(Path(tmp, "data")), "-out", os.devnull],
                 capture_output=True,
             )
         valid += result.returncode == 0
-    return found, valid
+        whole = whole or (result.returncode == 0 and c + d == len(pdf))
+    return found, valid, whole
 
 
-def compare_pdfs(rails_id, rust_id, signed=False):
-    """Renders both backends' result PDFs and checks their signatures. With `signed`, each
-    document of the last party (whose results are signed) must carry a signature."""
+def compare_pdfs(rails_id, rust_id, signed=False, masked=()):
+    """Renders both backends' result PDFs and compares their words (per-run tokens such as
+    times may differ), metadata and signatures. With `signed`, each document of the last
+    party (whose results are signed) must carry a signature. `masked` areas (template field
+    areas: `page`, `x`, `y`, `w`, `h` as fractions) are blanked on both renders first; the
+    stamps drawn there are compared by `compare_stamps`."""
     global FAILURES
     pairs = list(zip(result_pdfs(rails_id), result_pdfs(rust_id)))
     for index, (a_docs, b_docs) in enumerate(pairs):
@@ -255,44 +274,82 @@ def compare_pdfs(rails_id, rust_id, signed=False):
                 print(f"FAIL {label}: {len(pages_a)} pages vs {len(pages_b)}")
                 continue
             worst = 0.0
-            for x, y in zip(pages_a, pages_b):
+            for page, (x, y) in enumerate(zip(pages_a, pages_b)):
                 if x.size != y.size:
                     worst = 1.0
                     break
-                from PIL import ImageChops
+                from PIL import ImageChops, ImageDraw
+
+                for area in masked:
+                    if area.get("page", 0) != page:
+                        continue
+                    w, h = x.size
+                    box = [area["x"] * w - 1, area["y"] * h - 1,
+                           (area["x"] + area["w"]) * w + 1, (area["y"] + area["h"]) * h + 1]
+                    for image in (x, y):
+                        ImageDraw.Draw(image).rectangle(box, fill=255)
 
                 diff = ImageChops.difference(x, y)
                 changed = sum(1 for v in diff.getdata() if v > 64)
                 worst = max(worst, changed / (x.size[0] * x.size[1]))
             sig_a, sig_b = signatures(a), signatures(b)
-            ok = worst < 0.002 and sig_a == sig_b and sig_b[0] == sig_b[1] and (sig_b[0] > 0 or not signed or index < len(pairs) - 1)
+            same_info = pdf_info(a) == pdf_info(b)
+            text_a, text_b = ([w[0] for w in words(pdf)] for pdf in (a, b))
+            same_text = len(text_a) == len(text_b) and all(
+                x == y or (VARIABLE.search(x) and VARIABLE.search(y)) for x, y in zip(text_a, text_b)
+            )
+            ok = (worst < 0.002 and sig_a == sig_b and (sig_b[0] == 0 or sig_b[2]) and same_info and same_text
+                  and (sig_b[0] > 0 or not signed or index < len(pairs) - 1))
             if not ok:
                 FAILURES += 1
-            print(f"{'ok  ' if ok else 'FAIL'} {label} [pixels differing {worst:.4%}, signatures rails {sig_a} rust {sig_b}]")
+            print(f"{'ok  ' if ok else 'FAIL'} {label} [pixels differing {worst:.4%}, signatures rails {sig_a} rust {sig_b}]"
+                  + ("" if same_info else f"\n     metadata {pdf_info(a)} vs {pdf_info(b)}")
+                  + ("" if same_text else f"\n     text {text_a} vs {text_b}"))
 
 
 def words(pdf):
-    """Each word with its box, from `pdftotext -bbox`."""
+    """Each word with its box (points from the top left) and page index, from
+    `pdftotext -bbox`."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "doc.pdf"
         path.write_bytes(pdf)
         out = subprocess.run(["pdftotext", "-bbox", str(path), "-"], capture_output=True, check=True).stdout
     pattern = r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)</word>'
-    return [(m[4], tuple(float(v) for v in m[:4])) for m in re.findall(pattern, out.decode())]
+    return [(m[4], tuple(float(v) for v in m[:4]), page)
+            for page, text in enumerate(out.decode().split("<page ")[1:])
+            for m in re.findall(pattern, text)]
 
 
 # Text that differs between two runs: ids, checksums, addresses and times.
 VARIABLE = re.compile(r"\d|^[A-Za-z0-9_=-]{20,}$")
 
 
+def pdf_text(token):
+    """A literal or hexadecimal PDF string token as text (UTF-16BE with a byte order mark,
+    else Latin-1), so that both serializations of the same string compare equal."""
+    if token.startswith(b"<"):
+        data = bytes.fromhex(re.sub(rb"\s", b"", token[1:-1]).decode())
+    else:
+        escapes = {b"n": b"\n", b"r": b"\r", b"t": b"\t", b"b": b"\b", b"f": b"\f"}
+        data = re.sub(rb"\\([0-7]{1,3}|.)",
+                      lambda m: bytes([int(m[1], 8) & 255]) if m[1][:1].isdigit() else escapes.get(m[1], m[1]),
+                      token[1:-1], flags=re.S)
+    if data.startswith(b"\xfe\xff"):
+        return data[2:].decode("utf-16-be", "replace")
+    return data.decode("latin1")
+
+
 def pdf_info(pdf):
-    """The info dictionary's and the XMP packet's entries, with dates and packet ids masked."""
-    entries = sorted(set(re.findall(rb"/(Creator|Producer|ModDate|CreationDate|Title|M)\s*\(([^)]*)\)", pdf)))
-    xmp = re.search(rb"<x:xmpmeta.*?</x:xmpmeta>", pdf, re.S)
-    masked = re.sub(rb"\d{4}-\d\d-\d\dT[\d:]+[+-]\d\d:\d\d", b"<time>", xmp.group(0)) if xmp else b""
+    """The info dictionary's and the XMP packet's entries, with dates and packet ids masked
+    (how many distinct times an incremental file carries depends on timing)."""
+    keys = rb"Creator|Producer|ModDate|CreationDate|Title|Author|Subject|Keywords|M"
+    pattern = rb"/(" + keys + rb")\s*(\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]*>)"
+    entries = [(k, pdf_text(v)) for k, v in re.findall(pattern, pdf, re.S)]
+    packets = re.findall(rb"<x:xmpmeta.*?</x:xmpmeta>", pdf, re.S)
+    masked = b"\n".join(re.sub(rb"\d{4}-\d\d-\d\dT[\d:]+[+-]\d\d:\d\d", b"<time>", x) for x in packets)
     intents = re.findall(rb"/S\s*/GTS_PDFA1|/OutputConditionIdentifier\s*\([^)]*\)|/RegistryName\s*\([^)]*\)", pdf)
-    return ([(k.decode(), re.sub(r"\d{14}", "<date>", v.decode("latin1"))) for k, v in entries],
-            masked.decode(), sorted(set(intents)))
+    entries = sorted({(k.decode(), re.sub(r"\d{14}", "<date>", v)) for k, v in entries})
+    return entries, masked.decode(), sorted(set(intents))
 
 
 def compare_audit(rails_id, rust_id, label):
@@ -311,7 +368,7 @@ def compare_audit(rails_id, rust_id, label):
     wa, wb = words(a), words(b)
     if len(wa) != len(wb):
         problems.append(f"{len(wa)} words vs {len(wb)}")
-    for (ta, ba), (tb, bb) in zip(wa, wb):
+    for (ta, ba, _), (tb, bb, _) in zip(wa, wb):
         same = ta == tb or (VARIABLE.search(ta) and VARIABLE.search(tb))
         box = (0, 1, 2, 3) if ta == tb else (0, 1, 3)
         if not same or any(abs(ba[i] - bb[i]) > 0.01 for i in box):
@@ -319,17 +376,26 @@ def compare_audit(rails_id, rust_id, label):
             break
     pages_a, pages_b = render(a), render(b)
     worst = 0.0 if len(pages_a) == len(pages_b) else 1.0
-    from PIL import ImageChops
+    from PIL import ImageChops, ImageDraw
+
+    # The words that may differ (times, ids) were compared above; blank them on both renders
+    # (60 dpi) so that a different minute on every event line does not count as pixels.
+    for (ta, ba, page), (tb, bb, _) in zip(wa, wb):
+        if ta != tb and page < min(len(pages_a), len(pages_b)):
+            box = [min(ba[0], bb[0]) * 60 / 72 - 1, min(ba[1], bb[1]) * 60 / 72 - 1,
+                   max(ba[2], bb[2]) * 60 / 72 + 1, max(ba[3], bb[3]) * 60 / 72 + 1]
+            for image in (pages_a[page], pages_b[page]):
+                ImageDraw.Draw(image).rectangle(box, fill=255)
 
     for x, y in zip(pages_a, pages_b):
         changed = sum(1 for v in ImageChops.difference(x, y).getdata() if v > 64) if x.size == y.size else 1e9
         worst = max(worst, changed / (x.size[0] * x.size[1]))
-    if worst > 0.01:
+    if worst > 0.002:
         problems.append(f"pixels differing {worst:.4%}")
     if pdf_info(a) != pdf_info(b):
         problems.append(f"metadata {pdf_info(a)} vs {pdf_info(b)}")
     sig_a, sig_b = signatures(a), signatures(b)
-    if sig_a != sig_b or sig_b[0] != sig_b[1]:
+    if sig_a != sig_b or sig_b[0] != sig_b[1] or (sig_b[0] and not sig_b[2]):
         problems.append(f"signatures rails {sig_a} rust {sig_b}")
     if problems:
         FAILURES += 1
@@ -394,21 +460,29 @@ def run(base, token, template_id, fields):
     return first["submission_id"], steps
 
 
-def run_signed(base, token, template_id, fields):
+# Right-to-left party names and values (Hebrew, Arabic, mixed with Latin and digits),
+# which Rails draws in visual order (`TextUtils.maybe_rtl_reverse`).
+RTL = {"first": "דוד כהן", "second": "سارة أحمد", "full_name": "דוד כהן (מנהל) 2026",
+       "approver": "محمد أحمد 123 - Approved"}
+
+
+def run_signed(base, token, template_id, fields, rtl=False):
     """A submission both parties complete, so its result documents and audit trail are
     signed. Repeated form views make the event log long enough to continue on a second
-    page of the audit trail."""
+    page of the audit trail. With `rtl`, the names and text values are right-to-left."""
     status, created = call(
         RAILS, token, "POST", "/api/submissions",
         {"template_id": template_id, "send_email": False,
-         "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"},
-                        {"role": "Second Party", "email": "bob@example.test", "phone": "+4915112345678"}]},
+         "submitters": [{"role": "First Party", "email": "ana@example.test",
+                         "name": RTL["first"] if rtl else "Ana Example"},
+                        {"role": "Second Party", "email": "bob@example.test", "phone": "+4915112345678",
+                         **({"name": RTL["second"]} if rtl else {})}]},
     )
     assert status == 200, created
     values = {
-        "First Party": [(fields["Full Name"], "Ana Example"), (fields["Start Date"], "2026-03-14"),
-                        (fields["Plan"], "Pro")],
-        "Second Party": [(fields["Approver"], "Bob Approver")],
+        "First Party": [(fields["Full Name"], RTL["full_name"] if rtl else "Ana Example"),
+                        (fields["Start Date"], "2026-03-14"), (fields["Plan"], "Pro")],
+        "Second Party": [(fields["Approver"], RTL["approver"] if rtl else "Bob Approver")],
     }
     signature = {"First Party": "Signature", "Second Party": "Countersignature"}
     for submitter in created:
@@ -434,6 +508,127 @@ def run_signed(base, token, template_id, fields):
     return created[0]["submission_id"]
 
 
+def run_single(base, token, template_id):
+    """A completed single-party submission of a seeded template with a "Full Name" and a
+    "Signature" field: the image template (each image becomes a result PDF, and Rails also
+    merges them into one PDF) or the form template (its interactive form gets appearances
+    and is flattened)."""
+    _, template = call(RAILS, token, "GET", f"/api/templates/{template_id}")
+    fields = {f["name"]: f["uuid"] for f in template["fields"]}
+    status, created = call(
+        RAILS, token, "POST", "/api/submissions",
+        {"template_id": template_id, "send_email": False,
+         "submitters": [{"role": "Signer", "email": "ana@example.test", "name": "Ana Example"}]},
+    )
+    assert status == 200, created
+    signer = Browser(base)
+    s = created[0]["slug"]
+    signer.request("GET", f"/s/{s}")
+    upload = signer.request(
+        "POST", f"/s/{s}/upload", [("type", "signature")],
+        {"file": ("signature.png", "image/png", signature_png())},
+    )
+    status = signer.request(
+        "POST", f"/s/{s}",
+        [("_method", "put"), ("authenticity_token", signer.csrf),
+         (f"values[{fields['Full Name']}]", "Ana Example"),
+         (f"values[{fields['Signature']}]", json.loads(upload[1])["uuid"]),
+         ("completed", "true"), ("timezone", "Europe/Berlin")],
+        files={},
+    )
+    assert status[0] == 200, f"{base}: completing the single-party submission returned {status[0]}"
+    return created[0]["submission_id"]
+
+
+def run_stamps(token, template_id):
+    """The stamp template on both backends, completed party by party and alternating
+    between them so that both see the same completion minutes; each stamp field gets the
+    party's stamp image (`Submitters::CreateStampAttachment`)."""
+    _, template = call(RAILS, token, "GET", f"/api/templates/{template_id}")
+    fields = {f["name"]: f["uuid"] for f in template["fields"]}
+    values = {"First Party": [(fields["Full Name"], "Ana Example")],
+              "Second Party": [(fields["Approver"], "Bob Approver")]}
+    submissions = {}
+    for base in (RAILS, RUST):
+        status, created = call(
+            RAILS, token, "POST", "/api/submissions",
+            {"template_id": template_id, "send_email": False,
+             "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"},
+                            {"role": "Second Party", "email": "bob@example.test"}]},
+        )
+        assert status == 200, created
+        submissions[base] = created
+    for index in range(2):
+        for base in (RAILS, RUST):
+            submitter = submissions[base][index]
+            signer = Browser(base)
+            s = submitter["slug"]
+            signer.request("GET", f"/s/{s}")
+            status = signer.request(
+                "POST", f"/s/{s}",
+                [("_method", "put"), ("authenticity_token", signer.csrf),
+                 *((f"values[{uuid}]", value) for uuid, value in values[submitter["role"]]),
+                 ("completed", "true"), ("timezone", "Europe/Berlin")],
+                files={},
+            )
+            assert status[0] == 200, f"{base}: completing {submitter['role']} returned {status[0]}"
+    return tuple(submissions[base][0]["submission_id"] for base in (RAILS, RUST))
+
+
+def stamp_images(submission_id, reference=False):
+    """Each party's stamp images (PNG bytes), read through Rails. With `reference`, what
+    Rails generates for the same parties instead (`generate_stamp_image`, with the logo
+    for the fields that have it), so that the images share the completion time."""
+    script = f"""
+      s = Submission.find({submission_id})
+      puts(s.submitters.order(:id).map do |e|
+        if {'true' if reference else 'false'}
+          s.template_fields.select {{ |f| f['type'] == 'stamp' && f['submitter_uuid'] == e.uuid }}.map do |f|
+            image = Submitters::CreateStampAttachment.generate_stamp_image(e, with_logo: f.dig('preferences', 'with_logo') != false)
+            Base64.strict_encode64(image.write_to_buffer('.png', strip: true))
+          end
+        else
+          e.attachments.select {{ |a| a.filename.to_s == 'stamp.png' }}.map {{ |a| Base64.strict_encode64(a.download) }}
+        end
+      end.to_json)
+    """
+    result = subprocess.run(
+        ["docker", "compose", "-f", "compose.rust-dev.yml", "exec", "-T", "-w", "/app", "rails",
+         "bin/rails", "runner", script],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    return [[base64.b64decode(d) for d in docs] for docs in json.loads(result.stdout.strip().splitlines()[-1])]
+
+
+def compare_stamps(rust_id):
+    """The Rust server's stamp PNGs against the ones Rails generates for the same parties:
+    the same size and mode, and close in pixels. Both hint the text alike, but FreeType's
+    anti-aliasing differs slightly from the Rust server's, so edges may differ by a few
+    levels; the layout (font, size, wrapping, position) must not."""
+    global FAILURES
+    from PIL import Image, ImageChops
+
+    pairs = zip(stamp_images(rust_id, reference=True), stamp_images(rust_id))
+    for index, (a_docs, b_docs) in enumerate(pairs):
+        if len(a_docs) != len(b_docs):
+            FAILURES += 1
+            print(f"FAIL stamp {index}: {len(a_docs)} images vs {len(b_docs)}")
+            continue
+        for a, b in zip(a_docs, b_docs):
+            x, y = Image.open(io.BytesIO(a)), Image.open(io.BytesIO(b))
+            if (x.size, x.mode) != (y.size, y.mode):
+                FAILURES += 1
+                print(f"FAIL stamp {index}: {x.size} {x.mode} vs {y.size} {y.mode}")
+                continue
+            diff = list(ImageChops.difference(x.convert("L"), y.convert("L")).getdata())
+            mean = sum(diff) / len(diff) / 255
+            changed = sum(1 for v in diff if v > 64) / len(diff)
+            ok = mean < 0.01 and changed < 0.01
+            FAILURES += not ok
+            print(f"{'ok  ' if ok else 'FAIL'} stamp {index} [{x.size[0]}x{x.size[1]} {x.mode}, "
+                  f"mean difference {mean:.2%}, pixels differing {changed:.2%}]")
+
+
 def blank_png():
     from PIL import Image
 
@@ -450,6 +645,19 @@ def main():
     rust_id, rust = run(RUST, token, template_id, fields)
     signed_ids = (run_signed(RAILS, token, template_id, fields),
                   run_signed(RUST, token, template_id, fields))
+    rtl_ids = (run_signed(RAILS, token, template_id, fields, rtl=True),
+               run_signed(RUST, token, template_id, fields, rtl=True))
+    _, found = call(RAILS, token, "GET", "/api/templates?external_id=parity-images")
+    images_template_id = found["data"][0]["id"]
+    image_ids = (run_single(RAILS, token, images_template_id), run_single(RUST, token, images_template_id))
+    _, found = call(RAILS, token, "GET", "/api/templates?external_id=parity-stamp")
+    stamp_template_id = found["data"][0]["id"]
+    stamp_ids = run_stamps(token, stamp_template_id)
+    form_ids = []
+    for external_id in ("parity-form", "parity-form-stale"):
+        _, found = call(RAILS, token, "GET", f"/api/templates?external_id={external_id}")
+        form_template_id = found["data"][0]["id"]
+        form_ids.append((run_single(RAILS, token, form_template_id), run_single(RUST, token, form_template_id)))
     for label in rails:
         is_page = rails[label][1].lstrip().startswith("<")
         check(label, rails[label], rust[label], page if is_page else json_text)
@@ -472,12 +680,51 @@ def main():
         print("FAIL stored rows (signed)")
         print(diff(a, b))
     compare_pdfs(*signed_ids, signed=True)
+    a, b = (stored(i) for i in image_ids)
+    if a == b:
+        print("ok   stored rows (images)")
+    else:
+        FAILURES += 1
+        print("FAIL stored rows (images)")
+        print(diff(a, b))
+    compare_pdfs(*image_ids, signed=True)
     compare_audit(rails_id, rust_id, "audit trail")
     compare_audit(*signed_ids, "audit trail (signed)")
+    compare_audit(*image_ids, "audit trail (images)")
+    a, b = (stored(i) for i in rtl_ids)
+    if a == b:
+        print("ok   stored rows (right-to-left)")
+    else:
+        FAILURES += 1
+        print("FAIL stored rows (right-to-left)")
+        print(diff(a, b))
+    compare_pdfs(*rtl_ids, signed=True)
+    compare_audit(*rtl_ids, "audit trail (right-to-left)")
+    a, b = (stored(i) for i in stamp_ids)
+    if a == b:
+        print("ok   stored rows (stamps)")
+    else:
+        FAILURES += 1
+        print("FAIL stored rows (stamps)")
+        print(diff(a, b))
+    compare_stamps(stamp_ids[1])
+    _, stamp_template = call(RAILS, token, "GET", f"/api/templates/{stamp_template_id}")
+    stamp_areas = [a for f in stamp_template["fields"] if f["type"] == "stamp" for a in f["areas"]]
+    compare_pdfs(*stamp_ids, signed=True, masked=stamp_areas)
+    compare_audit(*stamp_ids, "audit trail (stamps)")
+    for label, ids in zip(("form", "form, stale"), form_ids):
+        a, b = (stored(i) for i in ids)
+        if a == b:
+            print(f"ok   stored rows ({label})")
+        else:
+            FAILURES += 1
+            print(f"FAIL stored rows ({label})")
+            print(diff(a, b))
+        compare_pdfs(*ids, signed=True)
     if os.environ.get("KEEP"):
-        print("kept", rails_id, rust_id, *signed_ids)
+        print("kept", rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids, *form_ids)
         sys.exit(1 if FAILURES else 0)
-    for submission_id in (rails_id, rust_id, *signed_ids):
+    for submission_id in (rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids, *stamp_ids, *(i for pair in form_ids for i in pair)):
         call(RAILS, token, "DELETE", f"/api/submissions/{submission_id}")
     sys.exit(1 if FAILURES else 0)
 

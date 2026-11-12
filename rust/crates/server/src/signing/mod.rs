@@ -11,8 +11,10 @@ pub mod emails;
 pub mod pages;
 pub mod results;
 pub mod send_email;
+pub mod stamp;
 pub mod start_form;
 pub mod submit;
+pub mod timestamp;
 
 use axum::{
     Router,

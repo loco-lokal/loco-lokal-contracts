@@ -2,6 +2,7 @@
 //! and the `HexaPDF` usage in `lib/submissions/`.
 
 pub mod edit;
+pub mod text_image;
 
 use std::path::{Path, PathBuf};
 

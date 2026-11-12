@@ -31,6 +31,8 @@ fn test_config() -> Config {
         production: false,
         job_concurrency: 0,
         force_ssl: false,
+        pdf_format: String::new(),
+        certs: serde_json::Map::new(),
     }
 }
 

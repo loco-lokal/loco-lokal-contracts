@@ -4,10 +4,13 @@
 //! on it, and it is saved as an incremental update, signed when the submission is done
 //! (or every time with the `multiple` e-signing preference).
 //!
+//! Two or more image documents are also merged into one more result PDF.
+//!
 //! Not supported yet (the job fails with a "not supported yet" error, so nothing differs
-//! silently): dynamic documents, two or more image documents (Rails merges them into one
-//! PDF), custom signing certificates, timestamp servers, and PDF/A output. Right-to-left
-//! text is drawn in logical order (Rails reorders it visually).
+//! silently): dynamic documents, and form field appearances HexaPDF would fail to create
+//! (`loco_pdf::edit::appearances`).
+//!
+//! With `PDF_FORMAT=pdf/a-3b`, the `:pdfa` task (level 3b) runs as each document is saved.
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -18,12 +21,13 @@ use loco_pdf::edit::{
     EditError, Editor, ImageInfo,
     layout::{Align, Fitted, Fragment, InlineImage, Input, Layouter, Status, TextStyle, Valign},
     parse_color,
+    pdfa::Pdfa,
     sign::SigningKey,
 };
 use loco_storage::{Attachment, Blob};
 use serde_json::{Value, json};
 
-use super::Form;
+use super::{Form, timestamp::TimestampHandler};
 use crate::{errors::AppError, state::AppState};
 
 const FONT_SIZE: f64 = 11.0;
@@ -51,6 +55,10 @@ const WITH_SIGNATURE_ID_REASON_KEY: &str = "with_signature_id_reason";
 const WITH_SIGNATURE_ID_COMPLETED_AT_KEY: &str = "with_signature_id_completed_at";
 const ESIGNING_PREFERENCE_KEY: &str = "esigning_preference";
 pub(super) const TIMESTAMP_SERVER_URL_KEY: &str = "timestamp_server_url";
+/// `Docuseal::AATL_CERT_NAME`.
+const AATL_CERT_NAME: &str = "docuseal_aatl";
+/// `Docuseal.pdf_format` for PDF/A-3b output.
+pub(super) const PDF_A_3B: &str = "pdf/a-3b";
 
 /// `EnsureResultGenerated::CHECK_COMPLETE_TIMEOUT`.
 const CHECK_COMPLETE_TIMEOUT: Duration = Duration::from_secs(90);
@@ -184,6 +192,8 @@ impl Configs {
 struct Pdf {
     uuid: String,
     editor: Editor,
+    /// The schema document is an image (`original_documents.find { … }.image?`), even when
+    /// the PDF is a previous party's result.
     is_image: bool,
 }
 
@@ -201,23 +211,19 @@ async fn generate(
     }
     fill_submitter_fields(state, &form, &configs, &mut pdfs).await?;
 
-    if pdfs.iter().filter(|p| p.is_image).count() >= 2 {
-        return Err(unsupported("Combining image documents into one result PDF"));
-    }
     let key = load_signing_key(state, form.account.id).await?;
-    if signing::encrypted_config_with_fallback(&state.db, form.account.id, TIMESTAMP_SERVER_URL_KEY)
+    let timestamp = TimestampHandler::load(state, form.account.id)
         .await?
-        .and_then(|v| state.secrets.encryptor.decrypt(&v).ok())
-        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
-        .is_some_and(|v| present(Some(&v)))
-    {
-        return Err(unsupported(
-            "Timestamping signatures with a timestamp server",
-        ));
-    }
+        .map(Arc::new);
     let reason = sign_reason(state, &form).await?;
+    let signer = reason.zip(key).map(|(reason, key)| Signer {
+        reason,
+        key: Arc::new(key),
+        timestamp,
+    });
 
     let mut results = Vec::new();
+    let mut image_pdfs: Vec<Vec<u8>> = Vec::new();
     for item in form.schema() {
         let Some(uuid) = item.get("attachment_uuid").and_then(Value::as_str) else {
             continue;
@@ -225,28 +231,58 @@ async fn generate(
         let Some(index) = pdfs.iter().position(|p| p.uuid == uuid) else {
             continue;
         };
-        let pdf = pdfs.remove(index);
+        let mut pdf = pdfs.remove(index);
+        if pdf.is_image {
+            pdf.editor = pdf.editor.rewrite(&pdf_now()).map_err(pdf_error)?;
+        }
+        let bytes = save_pdf(state, pdf.editor, signer.as_ref()).await?;
         let name = item.get("name").map(ruby_to_s).unwrap_or_default();
-        results.push(
-            build_pdf_attachment(
-                state,
-                submitter,
-                pdf,
-                &name,
-                reason.as_deref(),
-                key.as_ref(),
-            )
-            .await?,
-        );
+        if pdf.is_image {
+            image_pdfs.push(bytes.clone());
+        }
+        results.push(store_pdf(state, submitter, bytes, &pdf.uuid, &name).await?);
+    }
+    if image_pdfs.len() >= 2 {
+        let sources: Vec<&[u8]> = image_pdfs.iter().map(Vec::as_slice).collect();
+        let editor = Editor::merge(&sources, &pdf_now()).map_err(pdf_error)?;
+        let bytes = save_pdf(state, editor, signer.as_ref()).await?;
+        // `images_pdf_uuid(original_documents.select(&:image?))`: every image document of
+        // the schema, also those hidden by conditions.
+        let originals = super::pages::schema_documents(state, &form)
+            .await?
+            .unwrap_or_default();
+        let mut uuids: Vec<&str> = originals
+            .iter()
+            .filter(|d| is_image(&d.blob))
+            .map(|d| d.attachment.uuid.as_str())
+            .collect();
+        uuids.sort_unstable();
+        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, uuids.join(":").as_bytes());
+        let name = form
+            .submission
+            .name
+            .clone()
+            .or_else(|| form.template.as_ref().map(|t| t.name.clone()))
+            .unwrap_or_default();
+        results.push(store_pdf(state, submitter, bytes, &uuid.to_string(), &name).await?);
     }
     Ok(results)
 }
 
-/// `Accounts.load_signing_pkcs(account)` for the generated `esign_certs`.
+fn pdf_now() -> String {
+    Utc::now().format("D:%Y%m%d%H%M%S").to_string()
+}
+
+/// `Accounts.load_signing_pkcs(account)`: the certificates from `CERTS` when set, else the
+/// account's (or the first account's) `esign_certs`: the custom certificate selected as
+/// the default (a PKCS#12 file), or the generated certificates.
 pub(super) async fn load_signing_key(
     state: &AppState,
     account_id: i64,
 ) -> Result<Option<SigningKey>, AppError> {
+    if !state.config.certs.is_empty() {
+        return default_pkcs(&state.config.certs);
+    }
     let Some(encrypted) = signing::encrypted_config_with_fallback(
         &state.db,
         account_id,
@@ -257,16 +293,49 @@ pub(super) async fn load_signing_key(
         return Ok(None);
     };
     let value: Value = serde_json::from_str(&state.secrets.encryptor.decrypt(&encrypted)?)?;
-    let custom = value.get("custom").and_then(Value::as_array);
-    if custom.is_some_and(|c| {
+    let default_cert = value.get("custom").and_then(Value::as_array).and_then(|c| {
         c.iter()
-            .any(|e| e.get("status").and_then(Value::as_str) == Some("default"))
-    }) {
-        return Err(unsupported("Signing with a custom certificate"));
+            .find(|e| e.get("status").and_then(Value::as_str) == Some("default"))
+    });
+    if let Some(cert) = default_cert {
+        if cert.get("name").and_then(Value::as_str) == Some(AATL_CERT_NAME) {
+            return default_pkcs(&state.config.certs);
+        }
+        let data = cert.get("data").and_then(Value::as_str).unwrap_or_default();
+        let der = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, data)
+            .map_err(|e| anyhow::anyhow!("custom certificate: {e}"))?;
+        let password = cert.get("password").map(ruby_to_s).unwrap_or_default();
+        return SigningKey::from_pkcs12(&der, &password)
+            .map(Some)
+            .map_err(pdf_error);
     }
+    load_pkcs(&value)
+}
+
+/// `Docuseal.default_pkcs`: none with `enabled: false`, else the `CERTS` certificates.
+fn default_pkcs(certs: &serde_json::Map<String, Value>) -> Result<Option<SigningKey>, AppError> {
+    if certs.get("enabled") == Some(&Value::Bool(false)) {
+        return Ok(None);
+    }
+    if certs.is_empty() {
+        // `GenerateCertificate.load_pkcs({})` raises in Rails.
+        return Err(unsupported("Signing with the DocuSeal AATL certificate"));
+    }
+    load_pkcs(&Value::Object(certs.clone()))
+}
+
+/// `GenerateCertificate.load_pkcs(cert_data)`: PEM `cert`, `key`, `sub_ca` and `root_ca`.
+fn load_pkcs(value: &Value) -> Result<Option<SigningKey>, AppError> {
     let text = |key: &str| value.get(key).and_then(Value::as_str).unwrap_or_default();
     if text("key").is_empty() {
-        return Ok(None);
+        if text("cert").is_empty() {
+            return Ok(None);
+        }
+        // A certificate without its key: HexaPDF has nothing to sign with and the job
+        // fails in Rails.
+        return Err(unsupported(
+            "Signing with a certificate without a private key",
+        ));
     }
     let key = SigningKey::from_pem(
         text("cert"),
@@ -284,7 +353,13 @@ async fn sign_reason(state: &AppState, form: &Form) -> Result<Option<String>, Ap
         return Ok(Some(SIGN_REASON.to_owned()));
     }
     let submission = loco_db::submissions::find(&state.db, form.submission.id).await?;
-    let max = form.submitters.iter().filter_map(|s| s.completed_at).max();
+    // `submitters.maximum(:completed_at)` is queried now: the submitters loaded with the
+    // form may predate a later party's completion that the submission already records.
+    let max = loco_db::submissions::submitters_for(&state.db, &[form.submission.id])
+        .await?
+        .iter()
+        .filter_map(|s| s.completed_at)
+        .max();
     if submission.is_some_and(|s| s.completed_at.is_some()) && form.submitter.completed_at == max {
         return Ok(Some(SIGN_REASON.to_owned()));
     }
@@ -345,12 +420,12 @@ async fn build_pdfs_index(
                 == uuid
         });
         let schema_document = schema_documents.iter().find(|d| d.attachment.uuid == uuid);
-        let (blob, is_image) = match (found, schema_document) {
+        let (blob, from_image) = match (found, schema_document) {
             (Some((_, blob)), _) => (blob, is_image(blob)),
             (None, Some(document)) => (&document.blob, is_image(&document.blob)),
             (None, None) => continue,
         };
-        let mut editor = if is_image {
+        let mut editor = if from_image {
             let document = schema_document
                 .ok_or_else(|| unsupported("An image document outside the schema"))?;
             let Some((_, preview)) = document.previews.first() else {
@@ -376,6 +451,8 @@ async fn build_pdfs_index(
         };
         editor.rotate_pages();
         if flatten {
+            // `maybe_flatten_pdf`: appearances for the form's fields, then `flatten`.
+            editor.create_form_appearances().map_err(pdf_error)?;
             editor.flatten_form();
         }
         for warning in std::mem::take(&mut editor.warnings) {
@@ -384,7 +461,7 @@ async fn build_pdfs_index(
         pdfs.push(Pdf {
             uuid: uuid.to_owned(),
             editor,
-            is_image,
+            is_image: schema_document.is_some_and(|d| is_image(&d.blob)),
         });
     }
     Ok(pdfs)
@@ -562,7 +639,13 @@ fn resize(image: &image::DynamicImage, scale: f64) -> image::DynamicImage {
 
 /// `TextUtils::RTL_REGEXP`.
 pub(super) fn is_rtl(text: &str) -> bool {
-    text.chars().any(|c| matches!(u32::from(c), 0x0590..=0x05FF | 0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB1D..=0xFB4F | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF))
+    loco_domain::bidi::is_rtl(text)
+}
+
+/// `TextUtils.maybe_rtl_reverse(text)`: right-to-left text in visual order. Characters
+/// `TwitterCldr` has no data for fail the job, as they raise in Rails.
+pub(super) fn maybe_rtl_reverse(text: &str) -> Result<String, AppError> {
+    loco_domain::bidi::maybe_rtl_reverse(text).map_err(|e| anyhow::anyhow!("{e}").into())
 }
 
 /// `preferences.font_size` (`num.presence&.to_i`).
@@ -783,9 +866,6 @@ async fn fill_area(
         value = field.get("default_value").cloned();
     }
     let value_text = value.as_ref().map(ruby_to_s).unwrap_or_default();
-    if is_rtl(&value_text) {
-        tracing::warn!(field = ?field.get("uuid"), "right-to-left text is drawn in logical order");
-    }
     let text_align = match pref_str(field, "align") {
         Some("left") => Align::Left,
         Some("center") => Align::Center,
@@ -857,7 +937,7 @@ async fn fill_area(
                 .filter(|v| present(Some(v)))
                 .map(ruby_to_s);
             let reason_string =
-                reason_string(ctx, field, reason_value.as_deref(), attachment_created_at);
+                reason_string(ctx, field, reason_value.as_deref(), attachment_created_at)?;
             let mut base_font_size = (font_size / 1.8).trunc();
             let (area_x, area_y, area_w, area_h) =
                 (a.x * width, a.y * height, a.w * width, a.h * height);
@@ -1009,7 +1089,7 @@ async fn fill_area(
                 linked.push(blob.clone());
                 items.push(Input::Inline(paperclip_box(paperclip, font_size)));
                 items.push(Input::Text(Fragment::new(
-                    &format!("{}\n", blob.filename),
+                    &format!("{}\n", maybe_rtl_reverse(&blob.filename)?),
                     &text_style,
                 )));
             }
@@ -1128,7 +1208,7 @@ async fn fill_area(
             if let Some(mask) = pref(field, "mask").filter(|m| present(Some(m))) {
                 text = crate::email_variables::mask_value(&text, mask);
             }
-            let mut chars: Vec<char> = text.chars().collect();
+            let mut chars: Vec<char> = maybe_rtl_reverse(&text)?.chars().collect();
             let right_aligned = pref_str(field, "align") == Some("right");
             if right_aligned {
                 chars.reverse();
@@ -1227,6 +1307,7 @@ async fn fill_area(
                     .collect::<Vec<_>>()
                     .join(", "),
             };
+            text = maybe_rtl_reverse(&text)?;
             if let Some(mask) = pref(field, "mask").filter(|m| present(Some(m))) {
                 text = crate::email_variables::mask_value(&text, mask);
             }
@@ -1375,7 +1456,7 @@ fn reason_string(
     field: &Value,
     reason_value: Option<&str>,
     attachment_created_at: NaiveDateTime,
-) -> String {
+) -> Result<String, AppError> {
     let state = ctx.state;
     let submitter = &ctx.form.submitter;
     let timezone = timezone(ctx);
@@ -1407,34 +1488,80 @@ fn reason_string(
             .filter(|e| !e.is_empty())
             .map(|e| format!(" <{e}>"))
             .unwrap_or_default();
-        format!("{prefix}{reason} {name}{email}\n{time}")
+        let line = maybe_rtl_reverse(&format!("{prefix}{reason} {name}{email}"))?;
+        Ok(format!("{line}\n{time}"))
     } else {
-        time
+        Ok(time)
     }
 }
 
-/// `build_pdf_attachment`: saves (and maybe signs) a document and attaches it.
-async fn build_pdf_attachment(
+/// What documents are signed with (`build_signing_params(submitter, pkcs, tsa_url)`).
+pub(super) struct Signer {
+    pub reason: String,
+    pub key: Arc<SigningKey>,
+    /// `timestamp_handler: TimestampHandler.new(tsa_url:)`.
+    pub timestamp: Option<Arc<TimestampHandler>>,
+}
+
+/// `build_pdf_attachment`, first half: the document saved as an incremental update, signed
+/// when there is a signer, with `PDF_FORMAT=pdf/a-3b` as PDF/A-3b.
+async fn save_pdf(
+    state: &AppState,
+    mut editor: Editor,
+    signer: Option<&Signer>,
+) -> Result<Vec<u8>, AppError> {
+    editor.set_info_text("Creator", "DocuSeal (https://www.docuseal.com)");
+    if state.config.pdf_format == PDF_A_3B {
+        editor.set_pdfa(Pdfa {
+            conformance: 'B',
+            fix_glyph_widths: true,
+        });
+    }
+    save_document(editor, signer).await
+}
+
+/// `pdf.sign(io, reason:, **signing_params)` or `pdf.write(io, incremental: true)`, off the
+/// async workers: signing is CPU-bound, and the timestamp server is asked from within it.
+pub(super) async fn save_document(
+    editor: Editor,
+    signer: Option<&Signer>,
+) -> Result<Vec<u8>, AppError> {
+    let signer = signer.map(|s| (s.reason.clone(), s.key.clone(), s.timestamp.clone()));
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let now = Utc::now();
+        let date = now.format("D:%Y%m%d%H%M%S").to_string();
+        let Some((reason, key, timestamp)) = signer else {
+            return editor.save(&date);
+        };
+        let mut stamp = timestamp
+            .map(|handler| move |signature: &[u8]| runtime.block_on(handler.sign(signature)));
+        editor.save_signed(
+            &date,
+            &now.format("%Y%m%d%H%M%S").to_string(),
+            &reason,
+            &key,
+            stamp
+                .as_mut()
+                .map(|f| f as loco_pdf::edit::sign::Timestamper<'_>),
+        )
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("saving the document: {e}"))?
+    .map_err(pdf_error)
+}
+
+/// `build_pdf_attachment`, second half: the saved document attached to the submitter as
+/// `"#{name}.pdf"`, with its schema uuid as `original_uuid`.
+async fn store_pdf(
     state: &AppState,
     submitter: &Submitter,
-    mut pdf: Pdf,
+    bytes: Vec<u8>,
+    uuid: &str,
     name: &str,
-    reason: Option<&str>,
-    key: Option<&SigningKey>,
 ) -> Result<(Attachment, Blob), AppError> {
     use base64::Engine as _;
     use sha2::{Digest as _, Sha256};
-    let now = Utc::now();
-    pdf.editor
-        .set_info_text("Creator", "DocuSeal (https://www.docuseal.com)");
-    let date = now.format("D:%Y%m%d%H%M%S").to_string();
-    let bytes = match (reason, key) {
-        (Some(reason), Some(key)) => pdf
-            .editor
-            .save_signed(&date, &now.format("%Y%m%d%H%M%S").to_string(), reason, key)
-            .map_err(pdf_error)?,
-        _ => pdf.editor.save(&date).map_err(pdf_error)?,
-    };
     let sha256 = base64::engine::general_purpose::URL_SAFE.encode(Sha256::digest(&bytes));
     let filename = format!("{name}.pdf").replace('/', "-");
     let blob = state
@@ -1444,7 +1571,7 @@ async fn build_pdf_attachment(
             bytes.into(),
             &filename,
             Some("application/pdf"),
-            json!({ "original_uuid": pdf.uuid, "analyzed": true, "sha256": sha256 }),
+            json!({ "original_uuid": uuid, "analyzed": true, "sha256": sha256 }),
         )
         .await?;
     let attachment =
