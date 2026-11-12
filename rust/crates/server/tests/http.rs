@@ -23,6 +23,8 @@ fn test_config(secret_key_base: &str) -> Config {
         production: false,
         job_concurrency: 0,
         force_ssl: false,
+        pdf_format: String::new(),
+        certs: serde_json::Map::new(),
     }
 }
 

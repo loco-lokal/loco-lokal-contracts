@@ -57,5 +57,37 @@ unless template
   )
 end
 
+# A single-party template with two image documents, whose results Rails also merges into one
+# PDF. The second image is the first one mirrored, so that the page order shows.
+unless user.account.templates.exists?(name: 'Parity Images')
+  images = Template.create!(account: user.account, author: user, name: 'Parity Images',
+                            external_id: 'parity-images', folder: template.folder)
+
+  png = File.binread(ARGV.fetch(1))
+  mirrored = Vips::Image.new_from_buffer(png, '').fliphor.write_to_buffer('.png')
+  documents = [['front.png', png], ['back.png', mirrored]].map do |filename, data|
+    tempfile = Tempfile.new(['image', '.png']).tap { |f| f.binmode.write(data) && f.rewind }
+    file = ActionDispatch::Http::UploadedFile.new(tempfile:, filename:, type: 'image/png')
+
+    Templates::CreateAttachments.call(images, { files: [file] }).first.first
+  end
+
+  signer = { 'name' => 'Signer', 'uuid' => SecureRandom.uuid }
+  area = lambda do |document, x, y, w, h|
+    [{ 'x' => x, 'y' => y, 'w' => w, 'h' => h, 'attachment_uuid' => document.uuid, 'page' => 0 }]
+  end
+
+  images.update!(
+    schema: documents.map { |d| { 'attachment_uuid' => d.uuid, 'name' => d.filename.base } },
+    submitters: [signer],
+    fields: [
+      { 'uuid' => SecureRandom.uuid, 'submitter_uuid' => signer['uuid'], 'name' => 'Full Name',
+        'type' => 'text', 'required' => true, 'areas' => area.call(documents[0], 0.1, 0.1, 0.4, 0.05) },
+      { 'uuid' => SecureRandom.uuid, 'submitter_uuid' => signer['uuid'], 'name' => 'Signature',
+        'type' => 'signature', 'required' => true, 'areas' => area.call(documents[1], 0.5, 0.8, 0.4, 0.1) }
+    ]
+  )
+end
+
 puts "PARITY_TOKEN=#{token.token}"
 puts "PARITY_TEMPLATE_ID=#{template.id}"

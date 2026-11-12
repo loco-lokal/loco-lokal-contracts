@@ -5,6 +5,7 @@ use std::{path::Path, sync::Arc};
 use loco_pdf::edit::{
     Editor,
     layout::{Align, Fragment, Input, Layouter, TextStyle, Valign},
+    pdfa::Pdfa,
     sign::SigningKey,
 };
 use rsa::{RsaPrivateKey, pkcs8::EncodePrivateKey};
@@ -92,6 +93,7 @@ fn overlays_signs_and_renders() {
             "20261107120000",
             "Signed with DocuSeal.com",
             &signing_key(),
+            None,
         )
         .unwrap();
     assert!(
@@ -114,14 +116,162 @@ fn overlays_signs_and_renders() {
     let updated = next.save("D:20261107120100+00'00'").unwrap();
     assert!(updated.starts_with(&signed));
     let document = pdfium.load_pdf_from_byte_slice(&updated, None).unwrap();
+    let text = document.pages().get(0).unwrap().text().unwrap().all();
+    assert!(text.contains("Bob"), "{text}");
+    // The earlier revision's text keeps its own font (the next signer's resources must not
+    // replace it under the same name).
+    assert!(text.contains("Ana Exämple"), "{text}");
+}
+
+fn pdf_text(pdf: &[u8]) -> Vec<String> {
+    let pdfium = loco_pdf::load_pdfium(&loco_pdf::default_library_dir()).unwrap();
+    let document = pdfium.load_pdf_from_byte_slice(pdf, None).unwrap();
+    document
+        .pages()
+        .iter()
+        .map(|p| p.text().unwrap().all())
+        .collect()
+}
+
+#[test]
+fn merges_pages_of_signed_documents() {
+    let key = signing_key();
+    let mut sources = Vec::new();
+    for text in ["Front page", "Back page"] {
+        let mut editor = Editor::load(fixture()).unwrap();
+        draw(&mut editor, "Helvetica", text);
+        sources.push(
+            editor
+                .save_signed("D:20261107120000", "20261107120000", "Signed", &key, None)
+                .unwrap(),
+        );
+    }
+    let slices: Vec<&[u8]> = sources.iter().map(Vec::as_slice).collect();
+    let merged = Editor::merge(&slices, "D:20261107120000").unwrap();
+    assert_eq!(merged.page_ids().len(), 2);
+    let saved = merged
+        .save_signed("D:20261107120000", "20261107120000", "Signed", &key, None)
+        .unwrap();
+    let text = pdf_text(&saved);
+    assert_eq!(text.len(), 2);
     assert!(
-        document
-            .pages()
-            .get(0)
-            .unwrap()
-            .text()
-            .unwrap()
-            .all()
-            .contains("Bob")
+        text[0].contains("Front page") && text[1].contains("Back page"),
+        "{text:?}"
     );
+    // Each page keeps the signature field it had, plus the merged document's own.
+    assert_eq!(
+        saved
+            .windows(b"/ByteRange".len())
+            .filter(|w| *w == b"/ByteRange")
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn writes_pdfa_metadata_from_the_info_dictionary() {
+    let mut editor = Editor::load(fixture()).unwrap();
+    draw(&mut editor, "GoNotoKurrent-Regular.ttf", "Ana");
+    editor.set_info_text("Creator", "DocuSeal (https://www.docuseal.com)");
+    editor.set_pdfa(Pdfa {
+        conformance: 'B',
+        fix_glyph_widths: true,
+    });
+    let saved = editor.save("D:20261107120000").unwrap();
+    let text = String::from_utf8_lossy(&saved);
+    let xmp = &text[text.find("<x:xmpmeta").unwrap()..text.find("</x:xmpmeta>").unwrap()];
+    // `parse_metadata` order: dc (Author), xmp (Creator, dates), pdf (Producer), pdfaid.
+    let order = [
+        "<rdf:li>Evangelos Vlachogiannis</rdf:li>",
+        "<xmp:CreatorTool>DocuSeal (https://www.docuseal.com)</xmp:CreatorTool>",
+        "<xmp:CreateDate>2007-02-23T17:56:37+02:00</xmp:CreateDate>",
+        "<xmp:ModifyDate>2026-11-07T12:00:00+00:00</xmp:ModifyDate>",
+        "<pdf:Producer>HexaPDF version 1.7.0</pdf:Producer>",
+        "<pdfaid:part>3</pdfaid:part>\n<pdfaid:conformance>B</pdfaid:conformance>",
+    ];
+    let positions: Vec<usize> = order
+        .iter()
+        .map(|p| xmp.find(p).unwrap_or_else(|| panic!("{p} in {xmp}")))
+        .collect();
+    assert!(positions.is_sorted(), "{xmp}");
+    assert!(text.contains("/S /GTS_PDFA1") || text.contains("/S/GTS_PDFA1"));
+    assert!(pdf_text(&saved)[0].contains("Ana"));
+}
+
+#[test]
+fn embeds_the_timestamp_token_of_the_signature() {
+    let mut editor = Editor::load(fixture()).unwrap();
+    draw(&mut editor, "Helvetica", "Stamped");
+    let mut seen = Vec::new();
+    let mut stamp = |signature: &[u8]| {
+        seen.push(signature.to_vec());
+        vec![
+            0x18, 0x0F, b'2', b'0', b'2', b'6', b'1', b'1', b'0', b'7', b'1', b'2', b'0', b'0',
+            b'0', b'0', b'Z',
+        ]
+    };
+    let signed = editor
+        .save_signed(
+            "D:20261107120000",
+            "20261107120000",
+            "Signed",
+            &signing_key(),
+            Some(&mut stamp),
+        )
+        .unwrap();
+    assert_eq!(seen.len(), 1, "one token for the signature value");
+    assert_eq!(seen[0].len(), 256, "the RSA-2048 signature value");
+    // `/Contents` is 20 000 bytes (`signature_size: 20_000`), the token in `[1]` unsigned
+    // attributes under id-aa-timeStampToken.
+    let start = signed.windows(10).position(|w| w == b"/Contents<").unwrap() + 10;
+    let end = start + signed[start..].iter().position(|b| *b == b'>').unwrap();
+    assert_eq!(end - start, 40_000);
+    let hex = std::str::from_utf8(&signed[start..end]).unwrap();
+    assert!(
+        hex.contains("060b2a864886f70d010910020e"),
+        "id-aa-timeStampToken"
+    );
+    assert!(
+        hex.contains("180f32303236313130373132303030305a"),
+        "the token"
+    );
+}
+
+#[test]
+fn loads_signing_keys_from_pkcs12() {
+    use p12_keystore::{Certificate, KeyStore, KeyStoreEntry, PrivateKey, PrivateKeyChain};
+    let key = RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+    let pem = key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).unwrap();
+    let pair = rcgen::KeyPair::from_pkcs8_pem_and_sign_algo(&pem, &rcgen::PKCS_RSA_SHA256).unwrap();
+    let ca_key = RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+    let ca_pem = ca_key.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).unwrap();
+    let ca_pair =
+        rcgen::KeyPair::from_pkcs8_pem_and_sign_algo(&ca_pem, &rcgen::PKCS_RSA_SHA256).unwrap();
+    let ca = rcgen::CertificateParams::new(Vec::<String>::new())
+        .unwrap()
+        .self_signed(&ca_pair)
+        .unwrap();
+    let cert = rcgen::CertificateParams::new(Vec::<String>::new())
+        .unwrap()
+        .self_signed(&pair)
+        .unwrap();
+    let der = key.to_pkcs8_der().unwrap();
+    let mut store = KeyStore::new();
+    store.add_entry(
+        "parity",
+        KeyStoreEntry::PrivateKeyChain(PrivateKeyChain::new(
+            vec![1, 2, 3],
+            PrivateKey::from_der(der.as_bytes()).unwrap(),
+            // The CA first: the signing certificate is the one matching the key.
+            [
+                Certificate::from_der(ca.der()).unwrap(),
+                Certificate::from_der(cert.der()).unwrap(),
+            ],
+        )),
+    );
+    let p12 = store.writer("secret").write().unwrap();
+    let loaded = SigningKey::from_pkcs12(&p12, "secret").unwrap();
+    assert_eq!(loaded.certificate, cert.der().to_vec());
+    assert_eq!(loaded.chain, vec![ca.der().to_vec()]);
+    assert!(SigningKey::from_pkcs12(&p12, "wrong").is_err());
 }
