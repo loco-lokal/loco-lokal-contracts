@@ -257,10 +257,12 @@ def signatures(pdf):
     return found, valid, whole
 
 
-def compare_pdfs(rails_id, rust_id, signed=False):
+def compare_pdfs(rails_id, rust_id, signed=False, masked=()):
     """Renders both backends' result PDFs and compares their words (per-run tokens such as
     times may differ), metadata and signatures. With `signed`, each document of the last
-    party (whose results are signed) must carry a signature."""
+    party (whose results are signed) must carry a signature. `masked` areas (template field
+    areas: `page`, `x`, `y`, `w`, `h` as fractions) are blanked on both renders first; the
+    stamps drawn there are compared by `compare_stamps`."""
     global FAILURES
     pairs = list(zip(result_pdfs(rails_id), result_pdfs(rust_id)))
     for index, (a_docs, b_docs) in enumerate(pairs):
@@ -272,11 +274,20 @@ def compare_pdfs(rails_id, rust_id, signed=False):
                 print(f"FAIL {label}: {len(pages_a)} pages vs {len(pages_b)}")
                 continue
             worst = 0.0
-            for x, y in zip(pages_a, pages_b):
+            for page, (x, y) in enumerate(zip(pages_a, pages_b)):
                 if x.size != y.size:
                     worst = 1.0
                     break
-                from PIL import ImageChops
+                from PIL import ImageChops, ImageDraw
+
+                for area in masked:
+                    if area.get("page", 0) != page:
+                        continue
+                    w, h = x.size
+                    box = [area["x"] * w - 1, area["y"] * h - 1,
+                           (area["x"] + area["w"]) * w + 1, (area["y"] + area["h"]) * h + 1]
+                    for image in (x, y):
+                        ImageDraw.Draw(image).rectangle(box, fill=255)
 
                 diff = ImageChops.difference(x, y)
                 changed = sum(1 for v in diff.getdata() if v > 64)
@@ -529,6 +540,95 @@ def run_single(base, token, template_id):
     return created[0]["submission_id"]
 
 
+def run_stamps(token, template_id):
+    """The stamp template on both backends, completed party by party and alternating
+    between them so that both see the same completion minutes; each stamp field gets the
+    party's stamp image (`Submitters::CreateStampAttachment`)."""
+    _, template = call(RAILS, token, "GET", f"/api/templates/{template_id}")
+    fields = {f["name"]: f["uuid"] for f in template["fields"]}
+    values = {"First Party": [(fields["Full Name"], "Ana Example")],
+              "Second Party": [(fields["Approver"], "Bob Approver")]}
+    submissions = {}
+    for base in (RAILS, RUST):
+        status, created = call(
+            RAILS, token, "POST", "/api/submissions",
+            {"template_id": template_id, "send_email": False,
+             "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"},
+                            {"role": "Second Party", "email": "bob@example.test"}]},
+        )
+        assert status == 200, created
+        submissions[base] = created
+    for index in range(2):
+        for base in (RAILS, RUST):
+            submitter = submissions[base][index]
+            signer = Browser(base)
+            s = submitter["slug"]
+            signer.request("GET", f"/s/{s}")
+            status = signer.request(
+                "POST", f"/s/{s}",
+                [("_method", "put"), ("authenticity_token", signer.csrf),
+                 *((f"values[{uuid}]", value) for uuid, value in values[submitter["role"]]),
+                 ("completed", "true"), ("timezone", "Europe/Berlin")],
+                files={},
+            )
+            assert status[0] == 200, f"{base}: completing {submitter['role']} returned {status[0]}"
+    return tuple(submissions[base][0]["submission_id"] for base in (RAILS, RUST))
+
+
+def stamp_images(submission_id, reference=False):
+    """Each party's stamp images (PNG bytes), read through Rails. With `reference`, what
+    Rails generates for the same parties instead (`generate_stamp_image`, with the logo
+    for the fields that have it), so that the images share the completion time."""
+    script = f"""
+      s = Submission.find({submission_id})
+      puts(s.submitters.order(:id).map do |e|
+        if {'true' if reference else 'false'}
+          s.template_fields.select {{ |f| f['type'] == 'stamp' && f['submitter_uuid'] == e.uuid }}.map do |f|
+            image = Submitters::CreateStampAttachment.generate_stamp_image(e, with_logo: f.dig('preferences', 'with_logo') != false)
+            Base64.strict_encode64(image.write_to_buffer('.png', strip: true))
+          end
+        else
+          e.attachments.select {{ |a| a.filename.to_s == 'stamp.png' }}.map {{ |a| Base64.strict_encode64(a.download) }}
+        end
+      end.to_json)
+    """
+    result = subprocess.run(
+        ["docker", "compose", "-f", "compose.rust-dev.yml", "exec", "-T", "-w", "/app", "rails",
+         "bin/rails", "runner", script],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    return [[base64.b64decode(d) for d in docs] for docs in json.loads(result.stdout.strip().splitlines()[-1])]
+
+
+def compare_stamps(rust_id):
+    """The Rust server's stamp PNGs against the ones Rails generates for the same parties:
+    the same size and mode, and close in pixels. Both hint the text alike, but FreeType's
+    anti-aliasing differs slightly from the Rust server's, so edges may differ by a few
+    levels; the layout (font, size, wrapping, position) must not."""
+    global FAILURES
+    from PIL import Image, ImageChops
+
+    pairs = zip(stamp_images(rust_id, reference=True), stamp_images(rust_id))
+    for index, (a_docs, b_docs) in enumerate(pairs):
+        if len(a_docs) != len(b_docs):
+            FAILURES += 1
+            print(f"FAIL stamp {index}: {len(a_docs)} images vs {len(b_docs)}")
+            continue
+        for a, b in zip(a_docs, b_docs):
+            x, y = Image.open(io.BytesIO(a)), Image.open(io.BytesIO(b))
+            if (x.size, x.mode) != (y.size, y.mode):
+                FAILURES += 1
+                print(f"FAIL stamp {index}: {x.size} {x.mode} vs {y.size} {y.mode}")
+                continue
+            diff = list(ImageChops.difference(x.convert("L"), y.convert("L")).getdata())
+            mean = sum(diff) / len(diff) / 255
+            changed = sum(1 for v in diff if v > 64) / len(diff)
+            ok = mean < 0.01 and changed < 0.01
+            FAILURES += not ok
+            print(f"{'ok  ' if ok else 'FAIL'} stamp {index} [{x.size[0]}x{x.size[1]} {x.mode}, "
+                  f"mean difference {mean:.2%}, pixels differing {changed:.2%}]")
+
+
 def blank_png():
     from PIL import Image
 
@@ -550,6 +650,9 @@ def main():
     _, found = call(RAILS, token, "GET", "/api/templates?external_id=parity-images")
     images_template_id = found["data"][0]["id"]
     image_ids = (run_single(RAILS, token, images_template_id), run_single(RUST, token, images_template_id))
+    _, found = call(RAILS, token, "GET", "/api/templates?external_id=parity-stamp")
+    stamp_template_id = found["data"][0]["id"]
+    stamp_ids = run_stamps(token, stamp_template_id)
     form_ids = []
     for external_id in ("parity-form", "parity-form-stale"):
         _, found = call(RAILS, token, "GET", f"/api/templates?external_id={external_id}")
@@ -597,6 +700,18 @@ def main():
         print(diff(a, b))
     compare_pdfs(*rtl_ids, signed=True)
     compare_audit(*rtl_ids, "audit trail (right-to-left)")
+    a, b = (stored(i) for i in stamp_ids)
+    if a == b:
+        print("ok   stored rows (stamps)")
+    else:
+        FAILURES += 1
+        print("FAIL stored rows (stamps)")
+        print(diff(a, b))
+    compare_stamps(stamp_ids[1])
+    _, stamp_template = call(RAILS, token, "GET", f"/api/templates/{stamp_template_id}")
+    stamp_areas = [a for f in stamp_template["fields"] if f["type"] == "stamp" for a in f["areas"]]
+    compare_pdfs(*stamp_ids, signed=True, masked=stamp_areas)
+    compare_audit(*stamp_ids, "audit trail (stamps)")
     for label, ids in zip(("form", "form, stale"), form_ids):
         a, b = (stored(i) for i in ids)
         if a == b:
@@ -609,7 +724,7 @@ def main():
     if os.environ.get("KEEP"):
         print("kept", rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids, *form_ids)
         sys.exit(1 if FAILURES else 0)
-    for submission_id in (rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids, *(i for pair in form_ids for i in pair)):
+    for submission_id in (rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids, *stamp_ids, *(i for pair in form_ids for i in pair)):
         call(RAILS, token, "DELETE", f"/api/submissions/{submission_id}")
     sys.exit(1 if FAILURES else 0)
 

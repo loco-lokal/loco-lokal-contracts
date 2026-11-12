@@ -201,5 +201,37 @@ without_appearances = %w[notes empty amount]
 end
 # rubocop:enable Metrics/BlockLength
 
+# A two-party template with stamp fields (`Submitters::CreateStampAttachment`): with the
+# logo for the first party, without it for the second, and the role line of each.
+unless user.account.templates.exists?(name: 'Parity Stamp')
+  stamp_template = Template.create!(account: user.account, author: user, name: 'Parity Stamp',
+                                    external_id: 'parity-stamp', folder: template.folder)
+  pdf = File.binread(ARGV.fetch(0))
+  tempfile = Tempfile.new(['sample-document', '.pdf']).tap { |f| f.binmode.write(pdf) && f.rewind }
+  file = ActionDispatch::Http::UploadedFile.new(tempfile:, filename: 'sample-document.pdf',
+                                                type: 'application/pdf')
+  document = Templates::CreateAttachments.call(stamp_template, { files: [file] }).first.first
+  first_party = { 'name' => 'First Party', 'uuid' => SecureRandom.uuid }
+  second_party = { 'name' => 'Second Party', 'uuid' => SecureRandom.uuid }
+  area = lambda do |x, y, w, h|
+    [{ 'x' => x, 'y' => y, 'w' => w, 'h' => h, 'attachment_uuid' => document.uuid, 'page' => 0 }]
+  end
+  stamp_template.update!(
+    schema: [{ 'attachment_uuid' => document.uuid, 'name' => document.filename.base }],
+    submitters: [first_party, second_party],
+    fields: [
+      { 'uuid' => SecureRandom.uuid, 'submitter_uuid' => first_party['uuid'], 'name' => 'Full Name',
+        'type' => 'text', 'required' => true, 'areas' => area.call(0.1, 0.1, 0.3, 0.04) },
+      { 'uuid' => SecureRandom.uuid, 'submitter_uuid' => first_party['uuid'], 'name' => 'Stamp',
+        'type' => 'stamp', 'required' => false, 'areas' => area.call(0.1, 0.5, 0.5, 0.15) },
+      { 'uuid' => SecureRandom.uuid, 'submitter_uuid' => second_party['uuid'], 'name' => 'Approver',
+        'type' => 'text', 'required' => true, 'areas' => area.call(0.6, 0.1, 0.3, 0.04) },
+      { 'uuid' => SecureRandom.uuid, 'submitter_uuid' => second_party['uuid'], 'name' => 'Company Stamp',
+        'type' => 'stamp', 'required' => false, 'preferences' => { 'with_logo' => false },
+        'areas' => area.call(0.5, 0.75, 0.4, 0.12) }
+    ]
+  )
+end
+
 puts "PARITY_TOKEN=#{token.token}"
 puts "PARITY_TEMPLATE_ID=#{template.id}"

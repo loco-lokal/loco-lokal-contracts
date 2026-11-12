@@ -19,6 +19,8 @@ subsetter = "0.2.6"
 thiserror = "2.0.21"
 x509-parser = "0.18.1"
 uuid = { version = "1.29.1", features = ["v4"] }
+ab_glyph_rasterizer = "0.1.10"
+harfrust = "0.8.4"
 
 [lints]
 workspace = true

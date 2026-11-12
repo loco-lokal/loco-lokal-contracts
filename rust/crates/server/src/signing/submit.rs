@@ -7,7 +7,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
+use chrono::{NaiveDateTime, Utc};
 use loco_db::{
     JsonText,
     signing::{self, SubmitterProgress},
@@ -272,7 +272,7 @@ async fn update_submitter(
             .and_then(Value::as_str)
             .map(str::to_owned);
         form.submitter.values = progress.values.clone();
-        match assign_completed_values(state, form, validate_required).await? {
+        match assign_completed_values(state, form, now, validate_required).await? {
             Ok(values) => progress.values = JsonText(Value::Object(values)),
             Err(err) => return Ok(Err(err)),
         }
@@ -349,9 +349,10 @@ fn event_data(request: &RequestInfo) -> Map<String, Value> {
 async fn assign_completed_values(
     state: &AppState,
     form: &Form,
+    completed_at: NaiveDateTime,
     validate_required: bool,
 ) -> Result<Result<Map<String, Value>, SubmitError>, AppError> {
-    let values = match merge_default_values(state, form).await? {
+    let values = match merge_default_values(state, form, completed_at).await? {
         Ok(values) => values,
         Err(err) => return Ok(Err(err)),
     };
@@ -450,6 +451,7 @@ async fn assign_completed_values(
 async fn merge_default_values(
     state: &AppState,
     form: &Form,
+    completed_at: NaiveDateTime,
 ) -> Result<Result<Map<String, Value>, SubmitError>, AppError> {
     let mut defaults = Map::new();
     for field in form.fields() {
@@ -462,9 +464,15 @@ async fn merge_default_values(
             .unwrap_or_default();
         match field.get("type").and_then(Value::as_str) {
             Some("stamp") => {
-                return Ok(Err(SubmitError::Invalid(
-                    "Stamp fields are not supported yet".into(),
-                )));
+                // `acc[field['uuid']] ||= CreateStampAttachment.build_attachment(...).uuid`.
+                let with_logo = field.get("preferences").and_then(|p| p.get("with_logo"))
+                    != Some(&Value::Bool(false));
+                let uuid_value =
+                    super::stamp::build_attachment(state, form, completed_at, with_logo).await?;
+                defaults
+                    .entry(uuid.to_owned())
+                    .or_insert_with(|| json!(uuid_value));
+                continue;
             }
             Some("verification") => {
                 if signing::has_event(&state.db, form.submitter.id, &["complete_verification"])

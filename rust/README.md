@@ -113,7 +113,7 @@ cd rust/scripts/parity
 ./compare.py "$PARITY_TOKEN" GET /api/templates GET /api/submissions   # reads: method/path pairs, optional JSON body
 ./writes.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # template clone/update/archive, submission update/archive
 ./create.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # submission create modes and errors, submitter updates; compares stored rows
-./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs (also of the two-image template, with right-to-left text, and of two documents with interactive forms), audit trail
+./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs (also of the two-image template, with right-to-left text, with stamps, and of two documents with interactive forms), audit trail
 ./signing_configs.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # signed results and audit trails with timestamp servers and custom certificates
 ./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined, next-party, completed, delegation and copy emails via Mailpit, email_events rows
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
@@ -176,6 +176,7 @@ Result documents and their signatures, continued (issue #5):
 - Custom signing certificates: the PKCS#12 file selected as the default (with OpenSSL's choice of key and certificate), and the `CERTS` environment variable.
 - A later party's fonts and images no longer reuse the resource names of an earlier party's. That replaced the earlier text and signature images in multi-party results.
 - Interactive forms in the documents get their field appearances as `maybe_flatten_pdf` has HexaPDF create them (`loco_pdf::edit::appearances`), then are flattened: a forced pass with `NeedAppearances`, then the regular one of `flatten` (text fields without appearances, every combo and list box, check boxes and radio buttons without two state appearances). Single-line, comb and multiline text, list boxes, check marks and radio dots, borders, backgrounds, `MK /R` rotation and the `AFNumber_Format`/`AFPercent_Format` actions follow HexaPDF and DocuSeal's patches (no push button appearances).
+- Stamp fields (`signing/stamp.rs`, `Submitters::CreateStampAttachment`): completing a party adds its stamp image (`stamp.png`, reused by checksum) as the field's value. The logo and the half transparent white layer are composited as libvips does, and the text is laid out like `Vips::Image.text` (`loco_pdf::text_image`): Pango's runs, wrapping (hyphens inside words), line metrics and the autofit search, shaped with `harfrust` and hinted as fontconfig's `hintslight` has FreeType do. Its font is GoNoto Kurrent, which fontconfig picks for `sans` in the Docker image. The anti-aliasing differs slightly from FreeType's, so the PNG is close to Rails' but not identical: `signing.py` compares stamps with a tolerance and the rest of the result pages exactly.
 - Right-to-left text (`loco_domain::bidi`, `TextUtils.maybe_rtl_reverse`) in result documents and the audit trail: Arabic letters in their presentation forms (`ArabicLetterConnector`), then TwitterCldr's own Bidi algorithm with its quirks, and right alignment where Rails uses it. The bidi classes and the `RTL_REGEXP` code points come from Rails (`scripts/dump-bidi-classes.sh`, which also refreshes the test fixture of Rails' output for sample texts).
 
 These parts return 422 ("not supported yet") or are still missing:
@@ -190,7 +191,7 @@ These parts return 422 ("not supported yet") or are still missing:
 - The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
 - Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).
-- Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
+- Dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
 - The remember-signature cookie, and presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
 - Creating `completed` submitters and completing them through `PUT /api/submitters/:id`, and prefilling attachment fields.
 - Expiration jobs (Phase 7).
