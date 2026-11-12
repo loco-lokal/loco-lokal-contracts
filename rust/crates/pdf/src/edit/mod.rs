@@ -2,6 +2,7 @@
 //! HexaPDF: page overlays with text and images, rotation and annotation flattening, link
 //! annotations, document info, and saving as an incremental update (optionally signed).
 
+pub mod appearances;
 pub mod canvas;
 mod colors;
 pub mod compose;

@@ -275,3 +275,88 @@ fn loads_signing_keys_from_pkcs12() {
     assert_eq!(loaded.chain, vec![ca.der().to_vec()]);
     assert!(SigningKey::from_pkcs12(&p12, "wrong").is_err());
 }
+
+/// A one-page PDF with a text field and a checked check box, neither with appearances, in
+/// a form that sets `NeedAppearances`.
+fn form_pdf() -> Vec<u8> {
+    use lopdf::{Dictionary, Document, Object, Stream, dictionary};
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let helvetica = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        "Encoding" => "WinAnsiEncoding",
+    });
+    let text = doc.add_object(dictionary! {
+        "FT" => "Tx", "T" => Object::string_literal("name"), "V" => Object::string_literal("Jane Doe"),
+        "DA" => Object::string_literal("0 g /Helv 12 Tf"), "Type" => "Annot", "Subtype" => "Widget",
+        "Rect" => vec![50.into(), 700.into(), 250.into(), 720.into()],
+    });
+    let check = doc.add_object(dictionary! {
+        "FT" => "Btn", "T" => Object::string_literal("agree"), "V" => "Yes", "AS" => "Yes",
+        "Type" => "Annot", "Subtype" => "Widget",
+        "Rect" => vec![50.into(), 650.into(), 66.into(), 666.into()],
+    });
+    let content = doc.add_object(Stream::new(Dictionary::new(), Vec::new()));
+    let page = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id, "Contents" => content,
+        "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Annots" => vec![text.into(), check.into()],
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(
+            dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 },
+        ),
+    );
+    let form = dictionary! {
+        "Fields" => vec![text.into(), check.into()], "NeedAppearances" => true,
+        "DR" => dictionary! { "Font" => dictionary! { "Helv" => helvetica } },
+    };
+    let catalog = doc
+        .add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id, "AcroForm" => form });
+    doc.trailer.set("Root", catalog);
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+    bytes
+}
+
+#[test]
+fn creates_field_appearances_and_flattens_them() {
+    let mut editor = Editor::load(form_pdf()).unwrap();
+    assert!(editor.needs_appearances());
+    editor.create_form_appearances().unwrap();
+    editor.flatten_form();
+    let saved = editor.save("D:20261107120000").unwrap();
+    let text = pdf_text(&saved);
+    assert!(text[0].contains("Jane Doe"), "{text:?}");
+    // The check mark is ZapfDingbats' ✔ (a20, drawn as code 0x34 in the built-in encoding).
+    let document = lopdf::Document::load_mem(&saved).unwrap();
+    let catalog = document.catalog().unwrap();
+    assert!(!catalog.has(b"AcroForm"), "every field was flattened");
+    assert!(String::from_utf8_lossy(&saved).contains("/ZapfDingbats"));
+}
+
+#[test]
+fn refuses_text_its_font_cannot_encode() {
+    let mut editor = Editor::load(form_pdf()).unwrap();
+    // A value with a character WinAnsi has no code for.
+    let field = editor
+        .doc
+        .objects
+        .iter()
+        .find(|(_, o)| {
+            o.as_dict()
+                .is_ok_and(|d| d.has(b"FT") && d.get(b"FT").unwrap().as_name().unwrap() == b"Tx")
+        })
+        .map(|(id, _)| *id)
+        .unwrap();
+    editor
+        .doc
+        .get_object_mut(field)
+        .unwrap()
+        .as_dict_mut()
+        .unwrap()
+        .set("V", lopdf::text_string("Ж"));
+    let err = editor.create_form_appearances().unwrap_err();
+    assert!(err.to_string().contains("not supported yet"), "{err}");
+}

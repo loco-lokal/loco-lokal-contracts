@@ -497,9 +497,11 @@ def run_signed(base, token, template_id, fields, rtl=False):
     return created[0]["submission_id"]
 
 
-def run_images(base, token, template_id):
-    """A single-party submission of the image template: each image becomes a result PDF, and
-    Rails also merges them into one PDF (all signed, as the submission completes)."""
+def run_single(base, token, template_id):
+    """A completed single-party submission of a seeded template with a "Full Name" and a
+    "Signature" field: the image template (each image becomes a result PDF, and Rails also
+    merges them into one PDF) or the form template (its interactive form gets appearances
+    and is flattened)."""
     _, template = call(RAILS, token, "GET", f"/api/templates/{template_id}")
     fields = {f["name"]: f["uuid"] for f in template["fields"]}
     status, created = call(
@@ -523,7 +525,7 @@ def run_images(base, token, template_id):
          ("completed", "true"), ("timezone", "Europe/Berlin")],
         files={},
     )
-    assert status[0] == 200, f"{base}: completing the image submission returned {status[0]}"
+    assert status[0] == 200, f"{base}: completing the single-party submission returned {status[0]}"
     return created[0]["submission_id"]
 
 
@@ -547,7 +549,12 @@ def main():
                run_signed(RUST, token, template_id, fields, rtl=True))
     _, found = call(RAILS, token, "GET", "/api/templates?external_id=parity-images")
     images_template_id = found["data"][0]["id"]
-    image_ids = (run_images(RAILS, token, images_template_id), run_images(RUST, token, images_template_id))
+    image_ids = (run_single(RAILS, token, images_template_id), run_single(RUST, token, images_template_id))
+    form_ids = []
+    for external_id in ("parity-form", "parity-form-stale"):
+        _, found = call(RAILS, token, "GET", f"/api/templates?external_id={external_id}")
+        form_template_id = found["data"][0]["id"]
+        form_ids.append((run_single(RAILS, token, form_template_id), run_single(RUST, token, form_template_id)))
     for label in rails:
         is_page = rails[label][1].lstrip().startswith("<")
         check(label, rails[label], rust[label], page if is_page else json_text)
@@ -590,10 +597,19 @@ def main():
         print(diff(a, b))
     compare_pdfs(*rtl_ids, signed=True)
     compare_audit(*rtl_ids, "audit trail (right-to-left)")
+    for label, ids in zip(("form", "form, stale"), form_ids):
+        a, b = (stored(i) for i in ids)
+        if a == b:
+            print(f"ok   stored rows ({label})")
+        else:
+            FAILURES += 1
+            print(f"FAIL stored rows ({label})")
+            print(diff(a, b))
+        compare_pdfs(*ids, signed=True)
     if os.environ.get("KEEP"):
-        print("kept", rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids)
+        print("kept", rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids, *form_ids)
         sys.exit(1 if FAILURES else 0)
-    for submission_id in (rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids):
+    for submission_id in (rails_id, rust_id, *signed_ids, *image_ids, *rtl_ids, *(i for pair in form_ids for i in pair)):
         call(RAILS, token, "DELETE", f"/api/submissions/{submission_id}")
     sys.exit(1 if FAILURES else 0)
 

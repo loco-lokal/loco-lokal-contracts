@@ -7,8 +7,8 @@
 //! Two or more image documents are also merged into one more result PDF.
 //!
 //! Not supported yet (the job fails with a "not supported yet" error, so nothing differs
-//! silently): dynamic documents, and forms that need their fields' appearances generated
-//! (`NeedAppearances`).
+//! silently): dynamic documents, and form field appearances HexaPDF would fail to create
+//! (`loco_pdf::edit::appearances`).
 //!
 //! With `PDF_FORMAT=pdf/a-3b`, the `:pdfa` task (level 3b) runs as each document is saved.
 
@@ -451,11 +451,8 @@ async fn build_pdfs_index(
         };
         editor.rotate_pages();
         if flatten {
-            if editor.needs_appearances() {
-                return Err(unsupported(
-                    "Generating form field appearances (NeedAppearances)",
-                ));
-            }
+            // `maybe_flatten_pdf`: appearances for the form's fields, then `flatten`.
+            editor.create_form_appearances().map_err(pdf_error)?;
             editor.flatten_form();
         }
         for warning in std::mem::take(&mut editor.warnings) {
