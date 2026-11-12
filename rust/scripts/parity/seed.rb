@@ -93,7 +93,10 @@ end
 # appearances and flatten them as HexaPDF does: "Parity Form" has no appearances and sets
 # `NeedAppearances`; "Parity Form Stale" keeps HexaPDF's appearances (some stale) and leaves
 # out a few, without `NeedAppearances`.
-[['Parity Form', 'parity-form', true], ['Parity Form Stale', 'parity-form-stale', false]].each do |name, external_id, need|
+without_appearances = %w[notes empty amount]
+# rubocop:disable Metrics/BlockLength
+[['Parity Form', 'parity-form', true],
+ ['Parity Form Stale', 'parity-form-stale', false]].each do |name, external_id, need|
   next if user.account.templates.exists?(name:)
 
   pdf = HexaPDF::Document.new
@@ -116,16 +119,15 @@ end
   end
   text.call('name', [50, 740, 250, 760], 'Jane Doe')
   text.call('auto', [300, 740, 400, 752], 'A rather long value that has to shrink')
-  text.call('notes', [50, 640, 250, 720], "First line\nSecond line that wraps around the box", da: '0 g /F1 9 Tf') do |f|
-    f.initialize_as_multiline_text_field
-  end
+  text.call('notes', [50, 640, 250, 720], "First line\nSecond line that wraps around the box",
+            da: '0 g /F1 9 Tf', &:initialize_as_multiline_text_field)
   text.call('code', [300, 690, 420, 710], '123456', da: '0 0 1 rg /F1 12 Tf') do |f|
     f[:MaxLen] = 6
     f.initialize_as_comb_text_field
   end
   text.call('centered', [300, 650, 500, 675], 'Centered', align: 1, da: '/F1 11 Tf 1 0 0 rg',
-                                                            border: { color: [0, 0, 1], width: 2 },
-                                                            background: [0.9, 0.9, 0.6])
+                                                          border: { color: [0, 0, 1], width: 2 },
+                                                          background: [0.9, 0.9, 0.6])
   text.call('rotated', [50, 520, 75, 620], 'Turned', rotate: 90, da: '/F1 10 Tf 0 g')
   text.call('empty', [300, 600, 500, 620], nil, border: { color: 0 })
   text.call('amount', [300, 560, 500, 580], '-1234.5', da: '/F1 10 Tf 0 g') do |f|
@@ -173,7 +175,7 @@ end
     kept[:V] = 'Stale value' # the existing appearance is kept
     combo[:V] = 'Enterprise' # choice fields are always regenerated
     check[:AP][:N].delete(:Off)
-    %w[notes empty amount].each { |n| acro_form.field_by_name(n).each_widget { |w| w.delete(:AP) } }
+    without_appearances.each { |n| acro_form.field_by_name(n).each_widget { |w| w.delete(:AP) } }
   end
 
   form_template = Template.create!(account: user.account, author: user, name:,
@@ -183,7 +185,9 @@ end
   document = Templates::CreateAttachments.call(form_template, { files: [file] }).first.first
 
   signer = { 'name' => 'Signer', 'uuid' => SecureRandom.uuid }
-  area = ->(x, y, w, h) { [{ 'x' => x, 'y' => y, 'w' => w, 'h' => h, 'attachment_uuid' => document.uuid, 'page' => 0 }] }
+  area = lambda do |x, y, w, h|
+    [{ 'x' => x, 'y' => y, 'w' => w, 'h' => h, 'attachment_uuid' => document.uuid, 'page' => 0 }]
+  end
   form_template.update!(
     schema: [{ 'attachment_uuid' => document.uuid, 'name' => document.filename.base }],
     submitters: [signer],
@@ -195,6 +199,7 @@ end
     ]
   )
 end
+# rubocop:enable Metrics/BlockLength
 
 puts "PARITY_TOKEN=#{token.token}"
 puts "PARITY_TEMPLATE_ID=#{template.id}"
