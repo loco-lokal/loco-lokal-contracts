@@ -114,14 +114,51 @@ fn overlays_signs_and_renders() {
     let updated = next.save("D:20261107120100+00'00'").unwrap();
     assert!(updated.starts_with(&signed));
     let document = pdfium.load_pdf_from_byte_slice(&updated, None).unwrap();
+    let text = document.pages().get(0).unwrap().text().unwrap().all();
+    assert!(text.contains("Bob"), "{text}");
     assert!(
-        document
-            .pages()
-            .get(0)
-            .unwrap()
-            .text()
-            .unwrap()
-            .all()
-            .contains("Bob")
+        text.contains("Ana Exämple"),
+        "the earlier revision's fonts stay: {text}"
     );
+}
+
+#[test]
+fn imports_pages_into_a_new_document() {
+    let mut first = Editor::load(fixture()).unwrap();
+    first.rotate_pages();
+    first.flatten_form();
+    draw(&mut first, "GoNotoKurrent-Regular.ttf", "First Party");
+    let first_pages = first.page_ids().len();
+
+    let mut second = Editor::blank().unwrap();
+    second.add_page(595.0, 842.0).unwrap();
+    draw(&mut second, "Helvetica", "Audit Log");
+
+    let mut combined = Editor::blank().unwrap();
+    combined
+        .import_pages(&first.into_document().unwrap())
+        .unwrap();
+    combined
+        .import_pages(&second.into_document().unwrap())
+        .unwrap();
+    assert_eq!(combined.page_ids().len(), first_pages + 1);
+    let bytes = combined
+        .save_signed(
+            "D:20261107120000+00'00'",
+            "20261107120000",
+            "Signed with DocuSeal.com",
+            &signing_key(),
+        )
+        .unwrap();
+
+    let pdfium = loco_pdf::load_pdfium(&loco_pdf::default_library_dir()).unwrap();
+    let document = pdfium.load_pdf_from_byte_slice(&bytes, None).unwrap();
+    assert_eq!(
+        usize::try_from(document.pages().len()).unwrap(),
+        first_pages + 1
+    );
+    let text = |index: i32| document.pages().get(index).unwrap().text().unwrap().all();
+    assert!(text(0).contains("First Party"), "{}", text(0));
+    let last = i32::try_from(first_pages).unwrap();
+    assert!(text(last).contains("Audit Log"), "{}", text(last));
 }

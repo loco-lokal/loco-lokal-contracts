@@ -164,11 +164,7 @@ impl Editor {
 
     /// Appends an empty page with the media box `[0 0 width height]`.
     pub fn add_page(&mut self, width: f64, height: f64) -> Result<ObjectId, EditError> {
-        let pages_id = self
-            .catalog()
-            .and_then(|c| c.get(b"Pages").ok())
-            .and_then(|p| p.as_reference().ok())
-            .ok_or_else(|| EditError::Invalid("no page tree".to_owned()))?;
+        let pages_id = self.pages_root()?;
         let mut page = Dictionary::new();
         page.set("Type", Object::Name(b"Page".to_vec()));
         page.set("Parent", Object::Reference(pages_id));
@@ -194,6 +190,141 @@ impl Editor {
             pages.set("Kids", Object::Array(kids));
         }
         Ok(id)
+    }
+
+    /// The document as edited so far, with fonts, overlays and resources written out, to
+    /// import pages from (`pdf.dispatch_message(:complete_objects)`).
+    pub fn into_document(mut self) -> Result<Document, EditError> {
+        self.finish()?;
+        Ok(self.doc)
+    }
+
+    /// `source.pages.each { |page| pages << import(page) }`: appends deep copies of the
+    /// source's pages with everything they reference, as `HexaPDF::Importer` does. The
+    /// catalog and page tree nodes are not copied (references to them become `null`), so
+    /// form fields and signatures of the source are left behind, while their widgets
+    /// stay on the pages. Inherited page attributes are copied onto each page.
+    pub fn import_pages(&mut self, source: &Document) -> Result<(), EditError> {
+        let pages_id = self.pages_root()?;
+        let mut mapping: HashMap<ObjectId, Option<ObjectId>> = HashMap::new();
+        let mut imported = Vec::new();
+        for page in source.get_pages().into_values() {
+            let mut dict = source
+                .get_object(page)
+                .and_then(Object::as_dict)
+                .map_err(|_| EditError::Invalid("page is not a dictionary".to_owned()))?
+                .clone();
+            for key in [&b"Resources"[..], b"MediaBox", b"CropBox", b"Rotate"] {
+                if !dict.has(key)
+                    && let Some(value) = inherited_in(source, &dict, key)
+                {
+                    dict.set(key, value);
+                }
+            }
+            dict.remove(b"Parent");
+            let id = self.next_id();
+            mapping.insert(page, Some(id));
+            let mut copied = self.duplicate(source, Object::Dictionary(dict), &mut mapping);
+            if let Object::Dictionary(dict) = &mut copied {
+                dict.set("Parent", Object::Reference(pages_id));
+            }
+            self.doc.objects.insert(id, copied);
+            self.dirty.insert(id);
+            imported.push(Object::Reference(id));
+        }
+        if let Some(pages) = self.dict_mut(pages_id) {
+            let mut kids = pages
+                .get(b"Kids")
+                .ok()
+                .and_then(|k| k.as_array().ok())
+                .cloned()
+                .unwrap_or_default();
+            kids.extend(imported);
+            pages.set(
+                "Count",
+                Object::Integer(i64::try_from(kids.len()).unwrap_or(0)),
+            );
+            pages.set("Kids", Object::Array(kids));
+        }
+        Ok(())
+    }
+
+    /// Copies `object` from `source`, importing the objects it references.
+    fn duplicate(
+        &mut self,
+        source: &Document,
+        object: Object,
+        mapping: &mut HashMap<ObjectId, Option<ObjectId>>,
+    ) -> Object {
+        match object {
+            Object::Reference(id) => self.import_object(source, id, mapping),
+            Object::Array(items) => Object::Array(
+                items
+                    .into_iter()
+                    .map(|item| self.duplicate(source, item, mapping))
+                    .collect(),
+            ),
+            Object::Dictionary(dict) => {
+                Object::Dictionary(self.duplicate_dict(source, dict, mapping))
+            }
+            Object::Stream(stream) => {
+                let dict = self.duplicate_dict(source, stream.dict, mapping);
+                Object::Stream(Stream { dict, ..stream })
+            }
+            other => other,
+        }
+    }
+
+    fn duplicate_dict(
+        &mut self,
+        source: &Document,
+        dict: Dictionary,
+        mapping: &mut HashMap<ObjectId, Option<ObjectId>>,
+    ) -> Dictionary {
+        let mut out = Dictionary::new();
+        for (key, value) in dict {
+            let value = self.duplicate(source, value, mapping);
+            out.set(key, value);
+        }
+        out
+    }
+
+    fn import_object(
+        &mut self,
+        source: &Document,
+        id: ObjectId,
+        mapping: &mut HashMap<ObjectId, Option<ObjectId>>,
+    ) -> Object {
+        if let Some(mapped) = mapping.get(&id) {
+            return mapped.map_or(Object::Null, Object::Reference);
+        }
+        let Ok(object) = source.get_object(id) else {
+            return Object::Null;
+        };
+        let is_tree_node = object
+            .as_dict()
+            .or_else(|_| object.as_stream().map(|s| &s.dict))
+            .ok()
+            .and_then(|d| d.get(b"Type").ok())
+            .and_then(|t| t.as_name().ok())
+            .is_some_and(|t| t == b"Catalog" || t == b"Pages");
+        if is_tree_node {
+            mapping.insert(id, None);
+            return Object::Null;
+        }
+        let new_id = self.next_id();
+        mapping.insert(id, Some(new_id));
+        let copied = self.duplicate(source, object.clone(), mapping);
+        self.doc.objects.insert(new_id, copied);
+        self.dirty.insert(new_id);
+        Object::Reference(new_id)
+    }
+
+    fn pages_root(&self) -> Result<ObjectId, EditError> {
+        self.catalog()
+            .and_then(|c| c.get(b"Pages").ok())
+            .and_then(|p| p.as_reference().ok())
+            .ok_or_else(|| EditError::Invalid("no page tree".to_owned()))
     }
 
     fn catalog(&self) -> Option<&Dictionary> {
@@ -852,14 +983,15 @@ impl Editor {
     ) -> Result<(Arc<FontData>, String), EditError> {
         let key = format!("{family}/{variant}");
         if let Some(&index) = self.font_index.get(&key) {
-            return Ok((self.fonts[index].font.clone(), format!("DSF{index}")));
+            let id = self.fonts[index].object_id;
+            return Ok((self.fonts[index].font.clone(), font_name(id)));
         }
         let font = fonts::load(family, variant)?;
         let id = self.next_id();
         let index = self.fonts.len();
         self.fonts.push(UsedFont::new(font.clone(), id));
         self.font_index.insert(key, index);
-        Ok((font, format!("DSF{index}")))
+        Ok((font, font_name(id)))
     }
 
     /// Draws laid-out text on a page's overlay, with link annotations for linked text.
@@ -918,7 +1050,7 @@ impl Editor {
     /// Marks an image as used on a page and returns its resource name.
     pub fn use_image(&mut self, page: ObjectId, index: usize) -> String {
         self.uses.entry(page).or_default().images.insert(index);
-        format!("DSI{index}")
+        image_name(self.images[index].id)
     }
 
     /// An image registered once under `key` (the check and paperclip icons).
@@ -1114,13 +1246,18 @@ impl Editor {
             let fonts = used
                 .fonts
                 .iter()
-                .map(|i| (format!("DSF{i}"), self.fonts[*i].object_id))
+                .map(|i| {
+                    (
+                        font_name(self.fonts[*i].object_id),
+                        self.fonts[*i].object_id,
+                    )
+                })
                 .collect();
             sub(&mut resources, "Font", fonts, self);
             let mut xobjects: Vec<(String, ObjectId)> = used
                 .images
                 .iter()
-                .map(|i| (format!("DSI{i}"), self.images[*i].id))
+                .map(|i| (image_name(self.images[*i].id), self.images[*i].id))
                 .collect();
             xobjects.extend(used.forms);
             sub(&mut resources, "XObject", xobjects, self);
@@ -1333,15 +1470,41 @@ struct PageResources<'a> {
 
 impl canvas::Resources for PageResources<'_> {
     fn encode(&mut self, font_key: &str, glyphs: &[Glyph]) -> Object {
-        let index: usize = font_key.trim_start_matches("DSF").parse().unwrap_or(0);
+        let index = self
+            .fonts
+            .iter()
+            .position(|f| font_name(f.object_id) == font_key)
+            .unwrap_or(0);
         self.used.fonts.insert(index);
         self.fonts[index].encode(glyphs)
     }
 
     fn image(&self, image: usize) -> String {
-        let _ = self.images;
-        format!("DSI{image}")
+        image_name(self.images[image].id)
     }
+}
+
+/// The resource names of fonts and images carry their object ids, which are new in every
+/// revision, so a later revision's resources do not replace an earlier one's on a page.
+fn font_name(id: ObjectId) -> String {
+    format!("DSF{}", id.0)
+}
+
+fn image_name(id: ObjectId) -> String {
+    format!("DSI{}", id.0)
+}
+
+/// An attribute inherited by a page of `doc` from its page tree ancestors.
+fn inherited_in(doc: &Document, page: &Dictionary, key: &[u8]) -> Option<Object> {
+    let mut parent = page.get(b"Parent").ok()?.as_reference().ok()?;
+    for _ in 0..64 {
+        let node = doc.get_object(parent).ok()?.as_dict().ok()?;
+        if let Ok(value) = node.get(key) {
+            return Some(value.clone());
+        }
+        parent = node.get(b"Parent").ok()?.as_reference().ok()?;
+    }
+    None
 }
 
 fn number(object: &Object) -> Option<f64> {

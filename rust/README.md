@@ -117,6 +117,7 @@ cd rust/scripts/parity
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
 ./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
+./combined.py                                        # combine_pdf_result_key, in its own account: combined PDF, rows, emails, downloads, API
 ```
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
@@ -164,6 +165,16 @@ The rest of Phase 4 adds the links around the signing form:
 
 `downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
 
+Combined result documents (`combine_pdf_result_key`):
+
+- `signing/combined.rs` ports `Submissions::GenerateCombinedAttachment` and `EnsureCombinedGenerated`: the last party's documents as `generate_pdfs` fills them, in schema order, then the audit trail in the account's locale, in one PDF signed like the results and attached to the submission as `combined_document`. The completion job generates it before the audit trail, so `combined_document_url` is filled in the API and webhooks.
+- `loco_pdf::edit::Editor::import_pages` copies pages with what they reference into another document, as `HexaPDF::Importer` does.
+- Downloads (`Submitters.select_attachments_for_download` and `?combined=true` with `build_combined_url`) and the completed and documents copy emails use the combined document; the emails then leave out the separate audit trail.
+- `GET`/`PUT /api/submissions/:id` and `GET /api/submissions` with `include=combined_document_url` generate missing combined documents.
+- Unported branches reached from a request (custom certificates, timestamp servers, `PDF_FORMAT=pdf/a-3b`, right-to-left text in the audit trail, …) answer 422 with their "not supported yet" message.
+
+`combined.py` covers these, in its own account so that the setting does not change what the other checks see.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -171,12 +182,12 @@ These parts return 422 ("not supported yet") or are still missing:
   - two or more image documents (Rails merges them into one PDF);
   - custom signing certificates;
   - timestamp servers;
-  - PDF/A output.
+  - PDF/A-3b output (`PDF_FORMAT=pdf/a-3b`), also for the audit trail and the combined document.
 - Right-to-left text is drawn in logical order, where Rails reorders it visually.
 - Form fields that need their appearances generated (`NeedAppearances`) are left unflattened.
-- Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet", as does right-to-left text in the audit trail and a timestamp server for its signature.
+- Right-to-left text in the audit trail and a timestamp server for its signature fail the completion job with "not supported yet".
 - Email two-factor verification: sending and checking codes on the signing form and the share link (`shared_link_2fa`, reopening a pending party without the start form cookie, `?email_verification`) answers 422. A valid `email_2fa_slug` cookie or two-factor token is accepted.
-- Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission) answer 422.
+- The signed-in download links of the dashboard (`/submissions/:id/download`) and of the submission preview (`/submissions_preview/:slug/download`), including their `?combined=true`.
 - The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
 - Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).

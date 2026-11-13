@@ -56,12 +56,17 @@ pub(super) const TIMESTAMP_SERVER_URL_KEY: &str = "timestamp_server_url";
 const CHECK_COMPLETE_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub(super) fn unsupported(what: &str) -> AppError {
-    anyhow::anyhow!("{what} is not supported yet").into()
+    AppError::Unsupported(format!("{what} is not supported yet"))
 }
 
 #[allow(clippy::needless_pass_by_value, reason = "used with map_err")]
 pub(super) fn pdf_error(err: EditError) -> AppError {
-    anyhow::anyhow!("result documents: {err}").into()
+    match err {
+        EditError::Unsupported(what) => {
+            AppError::Unsupported(format!("{what} is not supported yet"))
+        }
+        err => anyhow::anyhow!("result documents: {err}").into(),
+    }
 }
 
 /// `Submissions::EnsureResultGenerated.call(submitter)`: the submitter's result documents,
@@ -181,31 +186,32 @@ impl Configs {
 }
 
 /// A document being filled, by its schema `attachment_uuid`.
-struct Pdf {
-    uuid: String,
-    editor: Editor,
+pub(super) struct Pdf {
+    pub(super) uuid: String,
+    pub(super) editor: Editor,
     is_image: bool,
 }
 
-/// `GenerateResultAttachments.call(submitter)`.
-async fn generate(
-    state: &AppState,
-    submitter: &Submitter,
-) -> Result<Vec<(Attachment, Blob)>, AppError> {
-    let form = Form::for_submitter(state, submitter.clone()).await?;
+/// `generate_pdfs(submitter)`: the documents with the submitter's values drawn on them,
+/// not saved yet.
+pub(super) async fn generate_pdfs(state: &AppState, form: &Form) -> Result<Vec<Pdf>, AppError> {
     let configs = Configs::load(state, form.account.id).await?;
-    let mut pdfs = build_pdfs_index(state, &form, configs.flatten).await?;
+    let mut pdfs = build_pdfs_index(state, form, configs.flatten).await?;
 
     if configs.with_signature_id || form.account.testing {
-        add_document_id(state, &form, &configs, &mut pdfs)?;
+        add_document_id(state, form, &configs, &mut pdfs)?;
     }
-    fill_submitter_fields(state, &form, &configs, &mut pdfs).await?;
+    fill_submitter_fields(state, form, &configs, &mut pdfs).await?;
+    Ok(pdfs)
+}
 
-    if pdfs.iter().filter(|p| p.is_image).count() >= 2 {
-        return Err(unsupported("Combining image documents into one result PDF"));
-    }
-    let key = load_signing_key(state, form.account.id).await?;
-    if signing::encrypted_config_with_fallback(&state.db, form.account.id, TIMESTAMP_SERVER_URL_KEY)
+/// `Accounts.load_timeserver_url(account)` is not ported: signing with a timestamp
+/// server fails instead of signing without one.
+pub(super) async fn check_timestamp_server(
+    state: &AppState,
+    account_id: i64,
+) -> Result<(), AppError> {
+    if signing::encrypted_config_with_fallback(&state.db, account_id, TIMESTAMP_SERVER_URL_KEY)
         .await?
         .and_then(|v| state.secrets.encryptor.decrypt(&v).ok())
         .and_then(|v| serde_json::from_str::<Value>(&v).ok())
@@ -215,6 +221,31 @@ async fn generate(
             "Timestamping signatures with a timestamp server",
         ));
     }
+    Ok(())
+}
+
+/// `Docuseal.pdf_format == 'pdf/a-3b'` (`PDF_FORMAT`): PDF/A-3b output is not ported.
+pub(super) fn check_pdf_format() -> Result<(), AppError> {
+    if std::env::var("PDF_FORMAT").is_ok_and(|f| f.to_lowercase() == "pdf/a-3b") {
+        return Err(unsupported("PDF/A-3b output (PDF_FORMAT)"));
+    }
+    Ok(())
+}
+
+/// `GenerateResultAttachments.call(submitter)`.
+async fn generate(
+    state: &AppState,
+    submitter: &Submitter,
+) -> Result<Vec<(Attachment, Blob)>, AppError> {
+    check_pdf_format()?;
+    let form = Form::for_submitter(state, submitter.clone()).await?;
+    let mut pdfs = generate_pdfs(state, &form).await?;
+
+    if pdfs.iter().filter(|p| p.is_image).count() >= 2 {
+        return Err(unsupported("Combining image documents into one result PDF"));
+    }
+    let key = load_signing_key(state, form.account.id).await?;
+    check_timestamp_server(state, form.account.id).await?;
     let reason = sign_reason(state, &form).await?;
 
     let mut results = Vec::new();

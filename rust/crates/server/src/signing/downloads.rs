@@ -33,35 +33,8 @@ fn head(status: StatusCode) -> Response {
     status.into_response()
 }
 
-/// 422 for the combined result document, which is not ported.
-fn combined_unsupported() -> Response {
-    (
-        StatusCode::UNPROCESSABLE_ENTITY,
-        axum::Json(serde_json::json!({
-            "error": "Combining the result documents into one PDF is not supported yet"
-        })),
-    )
-        .into_response()
-}
-
-/// `select_attachments_for_download` uses the combined document for completed
-/// submissions without verification fields when the account combines results.
-async fn uses_combined(state: &AppState, form: &Form) -> Result<bool, AppError> {
-    if form.submission.completed_at.is_none()
-        || form
-            .fields()
-            .iter()
-            .any(|f| f.get("type").and_then(Value::as_str) == Some("verification"))
-    {
-        return Ok(false);
-    }
-    Ok(super::audit::check_combined(state, form.account.id)
-        .await
-        .is_err())
-}
-
 /// `ActiveStorage::Blob.proxy_path(blob, expires_at: FILES_TTL.from_now.to_i, filename:)`.
-async fn proxy_path(
+pub(super) async fn proxy_path(
     state: &AppState,
     blob: &mut Blob,
     filename: Option<&str>,
@@ -78,14 +51,13 @@ async fn proxy_path(
     ))
 }
 
-/// `Submitters.select_attachments_for_download(submitter)`, rejecting combined results
-/// where Rails would use them (completed submission, no verification fields).
+/// `Submitters.select_attachments_for_download(submitter)`.
 async fn select_for_download(
     state: &AppState,
     submitter: Submitter,
 ) -> Result<(Form, Vec<(Attachment, Blob)>), AppError> {
     let form = Form::for_submitter(state, submitter).await?;
-    let attachments = super::audit::select_attachments(state, &form).await?;
+    let attachments = super::combined::select_attachments_for_download(state, &form).await?;
     Ok((form, attachments))
 }
 
@@ -262,16 +234,14 @@ async fn completed_for(
         }
     }
 
-    let last_form = Form::for_submitter(state, last.clone()).await?;
     if params.str("combined").as_deref() == Some("true") {
-        // `build_combined_url` is nil until the submission completes.
-        if last_form.submission.completed_at.is_none() {
-            return Ok(head(StatusCode::NOT_FOUND));
-        }
-        return Ok(combined_unsupported());
-    }
-    if uses_combined(state, &last_form).await? {
-        return Ok(combined_unsupported());
+        let last_form = Form::for_submitter(state, last).await?;
+        return Ok(
+            match super::combined::build_combined_url(state, &last_form).await? {
+                Some(url) => crate::api::ok(&Value::Array(vec![Value::String(url)])),
+                None => head(StatusCode::NOT_FOUND),
+            },
+        );
     }
     let urls = build_document_urls(state, last).await?;
     Ok(crate::api::ok(&urls))
@@ -306,14 +276,6 @@ pub async fn submitter(
         return Ok(redirect_to(&state, &headers, "/"));
     }
     super::results::ensure_result_generated(&state, &submitter).await?;
-    if uses_combined(
-        &state,
-        &Form::for_submitter(&state, submitter.clone()).await?,
-    )
-    .await?
-    {
-        return Ok(combined_unsupported());
-    }
     let urls = build_document_urls(&state, submitter).await?;
     Ok(crate::api::ok(&urls))
 }

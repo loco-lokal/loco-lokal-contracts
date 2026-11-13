@@ -15,6 +15,8 @@ use crate::state::AppState;
 #[derive(Debug)]
 pub enum AppError {
     Status(StatusCode),
+    /// A branch that is not ported yet: 422 with `{"error": "… is not supported yet"}`.
+    Unsupported(String),
     Internal(anyhow::Error),
 }
 
@@ -30,6 +32,7 @@ impl AppError {
     pub fn into_anyhow(self) -> anyhow::Error {
         match self {
             Self::Status(status) => anyhow::anyhow!("request failed with {status}"),
+            Self::Unsupported(message) => anyhow::anyhow!(message),
             Self::Internal(err) => err,
         }
     }
@@ -39,6 +42,10 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Status(status) => status,
+            Self::Unsupported(message) => {
+                tracing::warn!(error = message, "request needs an unported branch");
+                return crate::api::unprocessable(message);
+            }
             Self::Internal(err) => {
                 tracing::error!(error = format!("{err:#}"), "request failed");
                 StatusCode::INTERNAL_SERVER_ERROR
