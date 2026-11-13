@@ -218,6 +218,16 @@ def render(pdf):
         return [Image.open(p).convert("L").copy() for p in sorted(Path(tmp).glob("page*.png"))]
 
 
+def der(padded):
+    """The DER value at the start of a zero-padded signature (its last byte may be 0)."""
+    if len(padded) < 2 or padded[0] != 0x30:
+        return padded.rstrip(b"\0")
+    if padded[1] < 0x80:
+        return padded[:2 + padded[1]]
+    size = padded[1] & 0x7F
+    return padded[:2 + size + int.from_bytes(padded[2:2 + size], "big")]
+
+
 def signatures(pdf):
     """The number of signatures and how many verify. pdfsig's NSS cannot read the DocuSeal
     certificate chain and reports even Rails' signatures as invalid, so each signature is
@@ -231,7 +241,7 @@ def signatures(pdf):
         contents = pdf[a + b:c].strip().strip(b"<>")
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "data").write_bytes(pdf[a:a + b] + pdf[c:c + d])
-            Path(tmp, "sig").write_bytes(bytes.fromhex(contents.decode()).rstrip(b"\0"))
+            Path(tmp, "sig").write_bytes(der(bytes.fromhex(contents.decode())))
             result = subprocess.run(
                 ["openssl", "cms", "-verify", "-binary", "-noverify", "-inform", "DER",
                  "-in", str(Path(tmp, "sig")), "-content", str(Path(tmp, "data")), "-out", os.devnull],
@@ -296,16 +306,21 @@ def pdf_info(pdf):
 
 
 def compare_audit(rails_id, rust_id, label):
-    """The audit trails of two submissions: word positions (per-run tokens such as ids may
-    differ in text, not in position), the page renders, the metadata and the signature."""
+    """The audit trails of two submissions."""
+    compare_documents(audit_pdf(rails_id), audit_pdf(rust_id), label)
+
+
+def compare_documents(a, b, label):
+    """Two generated PDFs (audit trails, combined documents): word positions (per-run
+    tokens such as ids may differ in text, not in position), the page renders, the
+    metadata and the signature."""
     global FAILURES
-    a, b = audit_pdf(rails_id), audit_pdf(rust_id)
     if a is None and b is None:
         print(f"ok   {label} [none]")
         return
     if a is None or b is None:
         FAILURES += 1
-        print(f"FAIL {label}: audit trail rails {a is not None} rust {b is not None}")
+        print(f"FAIL {label}: rails {a is not None} rust {b is not None}")
         return
     problems = []
     wa, wb = words(a), words(b)
@@ -394,17 +409,20 @@ def run(base, token, template_id, fields):
     return first["submission_id"], steps
 
 
-def run_signed(base, token, template_id, fields):
+def run_signed(base, token, template_id, fields, send_email=False, emails=("ana@example.test", "bob@example.test"),
+               order="preserved", on_created=None):
     """A submission both parties complete, so its result documents and audit trail are
     signed. Repeated form views make the event log long enough to continue on a second
     page of the audit trail."""
     status, created = call(
         RAILS, token, "POST", "/api/submissions",
-        {"template_id": template_id, "send_email": False,
-         "submitters": [{"role": "First Party", "email": "ana@example.test", "name": "Ana Example"},
-                        {"role": "Second Party", "email": "bob@example.test", "phone": "+4915112345678"}]},
+        {"template_id": template_id, "send_email": send_email, "order": order,
+         "submitters": [{"role": "First Party", "email": emails[0], "name": "Ana Example"},
+                        {"role": "Second Party", "email": emails[1], "phone": "+4915112345678"}]},
     )
     assert status == 200, created
+    if on_created:
+        on_created(created)
     values = {
         "First Party": [(fields["Full Name"], "Ana Example"), (fields["Start Date"], "2026-03-14"),
                         (fields["Plan"], "Pro")],

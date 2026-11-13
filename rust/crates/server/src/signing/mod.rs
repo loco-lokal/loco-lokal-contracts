@@ -5,6 +5,7 @@
 
 pub mod actions;
 pub mod audit;
+pub mod combined;
 pub mod completion;
 pub mod downloads;
 pub mod emails;

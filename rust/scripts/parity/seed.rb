@@ -4,8 +4,24 @@
 # rust/scripts/parity/seed.sh). Idempotent: an existing "Parity NDA" template is reused.
 #
 # Prints PARITY_TOKEN (the first user's API token) and PARITY_TEMPLATE_ID.
+#
+# With a second argument `combined`, seeds a separate "Parity Combined" account with
+# `combine_pdf_result_key` enabled instead (for combined.py), so that the setting does
+# not change what the other checks see in the first account.
 
 user = User.order(:id).first || abort('Complete the first-run setup first.')
+
+if ARGV[1] == 'combined'
+  account = Account.find_by(name: 'Parity Combined') ||
+            Account.create!(name: 'Parity Combined', timezone: user.account.timezone, locale: user.account.locale)
+
+  user = account.users.find_by(email: 'parity-combined@example.com') ||
+         account.users.create!(email: 'parity-combined@example.com', first_name: 'Parity', last_name: 'Combined',
+                               password: SecureRandom.hex(16), role: 'admin')
+
+  account.account_configs.find_or_initialize_by(key: AccountConfig::COMBINE_PDF_RESULT_KEY).update!(value: true)
+end
+
 token = user.access_token || user.create_access_token!
 
 template = user.account.templates.find_by(name: 'Parity NDA')
