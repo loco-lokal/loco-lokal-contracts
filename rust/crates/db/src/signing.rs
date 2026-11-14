@@ -709,3 +709,14 @@ pub async fn insert_document_metadata(
     .await?;
     Ok(())
 }
+
+/// `record.touch` after an attachment is added (`touch_attachment_records`).
+pub async fn touch_submitter(db: impl PgExecutor<'_>, id: i64) -> Result<(), DbError> {
+    sqlx::query!(
+        "UPDATE submitters SET updated_at = (clock_timestamp() AT TIME ZONE 'utc') WHERE id = $1",
+        id
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}

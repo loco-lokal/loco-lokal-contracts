@@ -210,6 +210,67 @@ struct FormState<'a> {
     contact: Contact,
     error_message: Option<String>,
     resubmit_slug: Option<&'a str>,
+    /// Fields with a `:blank` error.
+    blank_fields: Vec<String>,
+}
+
+/// `errors.messages.blank` of rails-i18n in the available locales (`%{attribute}` is the
+/// attribute's human name).
+fn blank_message(locale: &str) -> &'static str {
+    match locale {
+        "es-ES" | "es" => "no puede estar en blanco",
+        "fr-FR" | "fr" => "doit être rempli(e)",
+        "pt-PT" | "pt" => "não pode estar em branco",
+        "de-DE" | "de" => "muss ausgefüllt werden",
+        "it-IT" | "it" => "non può essere lasciato in bianco",
+        "nl-NL" | "nl" => "moet opgegeven zijn",
+        "pl" => "nie może być puste",
+        "uk" => "не може бути пустим",
+        "cs" => "je povinná položka",
+        "he" => "לא יכול להיות ריק",
+        "ar" => "لا يمكن أن يكون محتوى %{attribute} فارغاً",
+        "ko" => "내용을 입력해 주세요",
+        "ja" => "を入力してください",
+        _ => "can't be blank",
+    }
+}
+
+/// An attribute value as Nokogiri's HTML serializer writes it.
+fn nokogiri_attr(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
+            '\t' => out.push_str("&#9;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `field_error_proc` for an input with a `:blank` error: the tag re-serialized by
+/// Nokogiri with the `input-error` class, followed by `shared/_field_error`.
+fn error_input(attributes: &[(&str, Option<String>)], message: &str) -> String {
+    let mut html = String::from("<input");
+    for (name, value) in attributes {
+        if let Some(value) = value {
+            html.push(' ');
+            html.push_str(name);
+            html.push_str("=\"");
+            html.push_str(&nokogiri_attr(value));
+            html.push('"');
+        }
+    }
+    html.push('>');
+    html.push_str("<span class=\"label-text-alt text-red-400 mt-1\">\n  ");
+    html.push_str(&loco_views::escape_html(message));
+    html.push_str("\n</span>\n");
+    html
 }
 
 /// Renders `start_form/show`.
@@ -236,6 +297,79 @@ async fn render_show(
         .or_else(|| param("email"))
         .or_else(|| form.contact.email.clone());
     let phone_value = param("phone").or_else(|| form.contact.phone.clone());
+    let multiple_fields = fields.len() > 1;
+    let placeholder = |single: &str, multiple: &str| {
+        state
+            .views
+            .t(locale, if multiple_fields { multiple } else { single }, &[])
+    };
+    let error = |key: &str, attribute: &str| {
+        form.blank_fields.iter().any(|f| f == key).then(|| {
+            format!(
+                "{attribute} {}",
+                blank_message(locale).replace("%{attribute}", attribute)
+            )
+        })
+    };
+    let name_error = error("name", "Name").map(|message| {
+        error_input(
+            &[
+                ("value", name_value.clone()),
+                ("required", Some("required".into())),
+                ("class", Some("base-input input-error".into())),
+                (
+                    "placeholder",
+                    Some(placeholder("provide_your_name_to_start", "provide_your_name")),
+                ),
+                ("type", Some("text".into())),
+                ("name", Some("submitter[name]".into())),
+                ("id", Some("submitter_name".into())),
+            ],
+            &message,
+        )
+    });
+    let email_error = error("email", "Email").map(|message| {
+        error_input(
+            &[
+                ("value", email_value.clone()),
+                ("required", Some("required".into())),
+                ("class", Some("base-input input-error".into())),
+                (
+                    "placeholder",
+                    Some(placeholder("provide_your_email_to_start", "provide_your_email")),
+                ),
+                ("type", Some("email".into())),
+                ("name", Some("submitter[email]".into())),
+                ("id", Some("submitter_email".into())),
+            ],
+            &message,
+        )
+    });
+    let phone_error = error("phone", "Phone").map(|message| {
+        error_input(
+            &[
+                ("value", phone_value.clone()),
+                ("pattern", Some(r"^\+[0-9\s\-]+$".into())),
+                ("required", Some("required".into())),
+                (
+                    "title",
+                    Some(state.views.t(locale, "use_international_format_1xxx_", &[])),
+                ),
+                ("class", Some("base-input w-full input-error".into())),
+                (
+                    "placeholder",
+                    Some(placeholder(
+                        "provide_your_phone_in_international_format_to_start",
+                        "provide_your_phone_in_international_format",
+                    )),
+                ),
+                ("type", Some("tel".into())),
+                ("name", Some("submitter[phone]".into())),
+                ("id", Some("submitter_phone".into())),
+            ],
+            &message,
+        )
+    });
     let policy_links_html = signing::account_configs(&state.db, account.id, &[POLICY_LINKS_KEY])
         .await?
         .into_iter()
@@ -265,10 +399,13 @@ async fn render_show(
             "resubmit_slug": form.resubmit_slug,
             "error_message": form.error_message,
             "link_form_fields": fields,
-            "multiple_fields": fields.len() > 1,
+            "multiple_fields": multiple_fields,
             "name_value": name_value,
             "email_value": email_value,
             "phone_value": phone_value,
+            "name_error_html": name_error,
+            "email_error_html": email_error,
+            "phone_error_html": phone_error,
             "policy_links_html": policy_links_html,
         }))
         .render("start_form/show.html")
@@ -399,6 +536,8 @@ struct NewParty {
     values: Map<String, Value>,
     preferences: Value,
     metadata: Value,
+    /// `(blob_id, uuid)` of attachments to copy to the submitter.
+    attachments: Vec<(i64, String)>,
 }
 
 /// `Submitters::StartForm.assign_submission_attributes` +
@@ -523,6 +662,20 @@ async fn create_submission(
     )
     .await?;
     signing::set_submitter_request(&mut *tx, submitter.id, ip, ua).await?;
+    for (blob_id, uuid) in &party.attachments {
+        loco_storage::Attachment::create_for_blob(
+            &mut *tx,
+            "Submitter",
+            submitter.id,
+            "attachments",
+            *blob_id,
+            uuid,
+        )
+        .await?;
+    }
+    if !party.attachments.is_empty() {
+        signing::touch_submitter(&mut *tx, submitter.id).await?;
+    }
     for (other_uuid, email) in others {
         submissions::insert_submitter(
             &mut *tx,
@@ -649,14 +802,32 @@ pub async fn update(
     };
     let contact = Contact::from_params(submitter_params);
     let fields = link_form_fields(template);
-    if fields.iter().any(|key| contact.present(key).is_none()) {
-        return unsupported(
+    // `find_or_initialize_submitter` with blank fields: a new submitter with an error on
+    // each of them, which `render :show` shows (`field_error_proc`).
+    let blank_fields: Vec<String> = fields
+        .iter()
+        .filter(|key| contact.present(key).is_none())
+        .cloned()
+        .collect();
+    if !blank_fields.is_empty() {
+        let error_message = (undefined_submitters(template_submitters(template)).len() > 1)
+            .then(|| multiple_submitters_error(&state, &locale, auth.as_ref(), template));
+        return render_show(
             &state,
             &session,
+            auth.as_ref(),
             &locale,
-            template,
-            "Starting without the requested details is not supported yet",
-        );
+            &loaded,
+            &params.0,
+            FormState {
+                contact,
+                error_message,
+                resubmit_slug: None,
+                blank_fields,
+            },
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+        .await;
     }
 
     // `Submitters::StartForm.find_or_initialize_submitter`
@@ -721,6 +892,7 @@ pub async fn update(
                 },
                 error_message: Some(error),
                 resubmit_slug: None,
+                blank_fields: Vec::new(),
             },
             StatusCode::UNPROCESSABLE_ENTITY,
         )
@@ -789,6 +961,7 @@ pub async fn update(
                 values: Map::new(),
                 preferences: json!({ "send_email": true }),
                 metadata: json!({}),
+                attachments: Vec::new(),
             },
             "link",
             ip.as_deref(),
@@ -988,6 +1161,7 @@ pub async fn resubmit(
                 contact: Contact::default(),
                 error_message: Some(error),
                 resubmit_slug: Some(&resubmitted.slug),
+                blank_fields: Vec::new(),
             },
             StatusCode::UNPROCESSABLE_ENTITY,
         )
@@ -1027,14 +1201,25 @@ pub async fn resubmit(
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
+        // `submitter.attachments << attachment.dup if submitter.values.value?(attachment.uuid)`:
+        // copies keep the uuid that the values refer to.
+        let mut attachments = Vec::new();
         if !values.is_empty() {
-            return unsupported(
-                &state,
-                &session,
-                &locale,
-                template,
-                "Resubmitting with default values is not supported yet",
-            );
+            for attachment in loco_storage::Attachment::for_record(
+                &state.db,
+                "Submitter",
+                resubmitted.id,
+                "attachments",
+            )
+            .await?
+            {
+                if values
+                    .values()
+                    .any(|v| v.as_str() == Some(attachment.uuid.as_str()))
+                {
+                    attachments.push((attachment.blob_id, attachment.uuid));
+                }
+            }
         }
         let preferences = if blank(prefs) {
             json!({ "send_email": true })
@@ -1061,6 +1246,7 @@ pub async fn resubmit(
                 values,
                 preferences,
                 metadata,
+                attachments,
             },
             source,
             ip.as_deref(),
@@ -1148,6 +1334,7 @@ pub async fn self_update(
                 values: Map::new(),
                 preferences: json!({ "send_email": true }),
                 metadata: json!({}),
+                attachments: Vec::new(),
             },
             "self",
             ip.as_deref(),
