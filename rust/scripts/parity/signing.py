@@ -106,8 +106,10 @@ class Browser:
         try:
             with self.opener.open(request) as response:
                 status, body, location = response.status, response.read().decode(), response.headers.get("Location")
+                self.headers = response.headers
         except urllib.error.HTTPError as err:
             status, body, location = err.code, err.read().decode(), err.headers.get("Location")
+            self.headers = err.headers
         match = re.search(r'name="csrf-token" content="([^"]+)"', body)
         if match:
             self.csrf = match.group(1)

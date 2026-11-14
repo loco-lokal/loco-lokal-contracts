@@ -104,7 +104,10 @@ fn render_error(state: &AppState, status: StatusCode, json: bool) -> Response {
     let page = match status.as_u16() {
         404 => "404",
         422 => "422",
-        _ => "500",
+        500 => "500",
+        // `ErrorsController` has no page for other statuses (such as 400 for
+        // `ActionController::ParameterMissing`), so Rails answers with its failsafe.
+        _ => return failsafe(),
     };
     let path = state
         .config
@@ -116,4 +119,20 @@ fn render_error(state: &AppState, status: StatusCode, json: bool) -> Response {
         Ok(html) => (status, Html(html)).into_response(),
         Err(_) => status.into_response(),
     }
+}
+
+/// `ActionDispatch::ShowExceptions#render_exception` when the error page itself fails.
+fn failsafe() -> Response {
+    let mut response = (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "500 Internal Server Error\nIf you are the administrator of this website, then please \
+         read this web application's log file and/or the web server's log file to find out \
+         what went wrong.",
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
 }

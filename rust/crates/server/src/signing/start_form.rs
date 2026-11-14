@@ -1070,3 +1070,90 @@ pub async fn resubmit(
     };
     Ok(start_redirect(&state, &headers, &submitter.slug))
 }
+
+/// `PUT /start_form_self/:id` (`StartFormSelfController#update`): a signed-in user fills in
+/// the template as its first party, reopening their open `self` submission unless the
+/// template's fields changed since.
+pub async fn self_update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    required: Result<crate::auth::RequireAuth, Response>,
+    ClientIp(ip): ClientIp,
+    session: Session,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let auth = match required {
+        Ok(crate::auth::RequireAuth(auth)) => auth,
+        Err(response) => return Ok(response),
+    };
+    // `load_resource :template` (`Template.find(params[:id])`)
+    let template = match id.parse::<i64>() {
+        Ok(id) => templates::find(&state.db, id).await?,
+        Err(_) => None,
+    }
+    .ok_or_else(not_found)?;
+
+    // `authorize_start!`
+    if !can_read(&state, Some(&auth), &template).await? {
+        session.flash_alert("You are not authorized to access this page.");
+        return Ok(redirect_to(&state, &headers, "/"));
+    }
+    if template.archived_at.is_some() {
+        return Ok(redirect_to(
+            &state,
+            &headers,
+            &format!("/templates/{}", template.id),
+        ));
+    }
+
+    let ua = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let mut existing =
+        signing::find_self_start_form_submitter(&state.db, template.id, &auth.user.email).await?;
+    // `outdated_template_fields?`
+    if let Some(submitter) = &existing {
+        let submission = submissions::find(&state.db, submitter.submission_id).await?;
+        if submission
+            .and_then(|s| s.template_fields)
+            .is_some_and(|fields| !blank(&fields) && fields != template.fields)
+        {
+            existing = None;
+        }
+    }
+
+    let submitter = if let Some(submitter) = existing {
+        signing::set_submitter_request(&state.db, submitter.id, ip.as_deref(), ua.as_deref())
+            .await?;
+        submitter
+    } else {
+        if has_dynamic_documents(&template) {
+            let locale = form_locale(&state, Some(&auth), None, &headers);
+            return unsupported(
+                &state,
+                &session,
+                &locale,
+                &template,
+                "Templates with dynamic documents are not supported yet",
+            );
+        }
+        create_submission(
+            &state,
+            &template,
+            NewParty {
+                email: Some(auth.user.email.clone()),
+                phone: None,
+                name: Some(auth.user.full_name()),
+                values: Map::new(),
+                preferences: json!({ "send_email": true }),
+                metadata: json!({}),
+            },
+            "self",
+            ip.as_deref(),
+            ua.as_deref(),
+        )
+        .await?
+    };
+    Ok(start_redirect(&state, &headers, &submitter.slug))
+}

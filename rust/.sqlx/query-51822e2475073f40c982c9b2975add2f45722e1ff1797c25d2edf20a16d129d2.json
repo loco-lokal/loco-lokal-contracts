@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO submitters (submission_id, account_id, uuid, email, phone, slug, values,\n                                   preferences, metadata, created_at, updated_at)\n           VALUES ($1, $2, $3, $4, $5, $6, '{}', '{}', '{}',\n                   (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
+  "query": "SELECT r.id, r.submission_id, r.uuid, r.email, r.slug,\n                  r.values AS \"values: JsonText\", r.ua, r.ip, r.sent_at, r.opened_at,\n                  r.completed_at, r.created_at, r.updated_at, r.name, r.phone, r.external_id,\n                  r.preferences AS \"preferences: JsonText\",\n                  r.metadata AS \"metadata: JsonText\", r.account_id, r.declined_at,\n                  r.timezone, r.template_id\n           FROM submitters r\n           WHERE r.template_id = $1\n             AND r.submission_id IN (\n               SELECT s.id FROM submissions s\n               WHERE s.template_id = $1 AND s.archived_at IS NULL AND s.source = 'self'\n                 AND (s.expire_at IS NULL OR s.expire_at >= (now() AT TIME ZONE 'utc')))\n             AND r.declined_at IS NULL AND r.external_id IS NULL AND r.completed_at IS NULL\n             AND r.email = $2\n           ORDER BY r.id DESC LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -249,11 +249,7 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Int8",
-        "Varchar",
-        "Varchar",
-        "Varchar",
-        "Varchar"
+        "Text"
       ]
     },
     "nullable": [
@@ -281,5 +277,5 @@
       true
     ]
   },
-  "hash": "b4c5294d0e0170b5cbaa57746142bfe2597bce1bfbcfc61e0988366a4f25924a"
+  "hash": "51822e2475073f40c982c9b2975add2f45722e1ff1797c25d2edf20a16d129d2"
 }

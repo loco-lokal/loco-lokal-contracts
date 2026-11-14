@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, RawQuery, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -187,6 +187,7 @@ pub async fn show(
     session: Session,
     headers: HeaderMap,
     Query(query): Query<ShowQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> Result<Response, AppError> {
     let locale = form_locale(&state, auth.as_ref(), query.lang.as_deref(), &headers);
     let Some(form) = Form::load(&state, &slug).await? else {
@@ -277,12 +278,22 @@ pub async fn show(
             prefill_initials = data;
         }
     }
-    if configs.prefill_signature
-        && let Some(auth) = auth.as_ref()
-        && let Some(data) =
-            user_attachment(&state, &form, &origin, auth.user.id, "signature").await?
-    {
-        prefill_signature = data;
+    if configs.prefill_signature {
+        let saved = match auth.as_ref() {
+            Some(auth) => {
+                user_attachment(&state, &form, &origin, auth.user.id, "signature").await?
+            }
+            None => None,
+        };
+        let params = raw_query
+            .as_deref()
+            .map_or_else(|| json!({}), crate::api::params::parse_nested_query);
+        prefill_signature = match saved {
+            Some(data) => data,
+            None => remembered_signature(&state, &form, &origin, &params, &headers)
+                .await?
+                .unwrap_or(Value::Null),
+        };
     }
 
     let form_data = submission_form_data(
@@ -371,14 +382,89 @@ async fn user_attachment(
         return Ok(None);
     };
     blob.ensure_uuid(&state.db).await?;
+    Ok(Some(prefill_data(state, form, origin, &attachment, &blob)))
+}
+
+/// `cookies.encrypted[:signature_uuids]`: the signatures a browser drew, by email.
+pub const SIGNATURE_UUIDS_COOKIE: &str = "signature_uuids";
+/// `Submitters::FindRememberedSignature::SIGNED_UUID_PURPOSE`.
+const SIGNED_UUID_PURPOSE: &str = "signature";
+
+/// `Submitters::FindRememberedSignature.call` with `build_prefill_attachment_data`: the
+/// signature from `params[:signed_signature_uuids]` (signed uuids by email) or else from
+/// the `signature_uuids` cookie, when it belongs to a record with the submitter's email.
+async fn remembered_signature(
+    state: &AppState,
+    form: &Form,
+    origin: &str,
+    params: &Value,
+    headers: &HeaderMap,
+) -> Result<Option<Value>, AppError> {
+    let email = form.submitter.email.clone().unwrap_or_default();
+    let uuid = match params
+        .get("signed_signature_uuids")
+        .filter(|v| present(Some(v)))
+    {
+        Some(signed) => signed
+            .get(&email)
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .and_then(|signed| {
+                state
+                    .secrets
+                    .signed_id_verifier
+                    .verify(signed, Some(SIGNED_UUID_PURPOSE))
+                    .ok()
+            })
+            .and_then(|v| v.as_str().map(str::to_owned)),
+        None => crate::cookies::encrypted(state, headers, SIGNATURE_UUIDS_COOKIE)
+            .filter(|s| !s.trim().is_empty())
+            .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+            .and_then(|values| {
+                values
+                    .get(&email)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            }),
+    };
+    let Some(uuid) = uuid.filter(|u| !u.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let Some(attachment) = Attachment::find_by_uuid(&state.db, &uuid).await? else {
+        return Ok(None);
+    };
+    // `signature_attachment.record.email != submitter.email`
+    let record_email = match attachment.record_type.as_str() {
+        "Submitter" => loco_db::submissions::find_submitter(&state.db, attachment.record_id)
+            .await?
+            .and_then(|s| s.email),
+        "User" => loco_db::users::find(&state.db, attachment.record_id)
+            .await?
+            .map(|u| u.email),
+        _ => None,
+    };
+    if record_email.is_none() || record_email != form.submitter.email {
+        return Ok(None);
+    }
+    let mut blob = attachment.blob(&state.db).await?;
+    blob.ensure_uuid(&state.db).await?;
+    Ok(Some(prefill_data(state, form, origin, &attachment, &blob)))
+}
+
+/// `Submitters.build_prefill_attachment_data`.
+fn prefill_data(
+    state: &AppState,
+    form: &Form,
+    origin: &str,
+    attachment: &Attachment,
+    blob: &Blob,
+) -> Value {
     let token = state.secrets.signed_id_verifier.generate(
         &json!([attachment.uuid, form.submitter.slug]),
         Some("prefill_attachment"),
         None,
     );
-    Ok(Some(
-        json!({ "token": token, "url": crate::disk::blob_url(state, origin, &blob) }),
-    ))
+    json!({ "token": token, "url": crate::disk::blob_url(state, origin, blob) })
 }
 
 /// A document of the form: its attachment, blob and page previews.

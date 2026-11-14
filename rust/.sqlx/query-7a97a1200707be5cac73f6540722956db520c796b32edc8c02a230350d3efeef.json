@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT text_runs FROM document_metadata WHERE account_id = $1 AND blob_checksum = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "text_runs",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "document_metadata",
+            "name": "text_runs"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7a97a1200707be5cac73f6540722956db520c796b32edc8c02a230350d3efeef"
+}

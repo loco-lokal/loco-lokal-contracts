@@ -2,6 +2,7 @@
 //! and the `HexaPDF` usage in `lib/submissions/`.
 
 pub mod edit;
+pub mod text;
 
 use std::path::{Path, PathBuf};
 
@@ -13,6 +14,8 @@ pub enum PdfError {
     Load { path: PathBuf, source: PdfiumError },
     #[error(transparent)]
     Pdfium(#[from] PdfiumError),
+    #[error("{0}")]
+    Unavailable(String),
 }
 
 /// Directory holding libpdfium: `PDFIUM_LIB_DIR`, else `rust/vendor/pdfium/lib`
@@ -33,6 +36,23 @@ pub fn load_pdfium(dir: &Path) -> Result<Pdfium, PdfError> {
     })?;
 
     Ok(Pdfium::new(bindings))
+}
+
+static SHARED: std::sync::OnceLock<Result<Pdfium, String>> = std::sync::OnceLock::new();
+/// `PDFium` is not thread-safe: calls through [`with_shared`] run one at a time.
+static SHARED_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Runs `f` with the process-wide `PDFium` instance (loaded from [`default_library_dir`]
+/// on first use), holding a lock so that only one caller uses the library at a time.
+pub fn with_shared<R>(f: impl FnOnce(&Pdfium) -> R) -> Result<R, PdfError> {
+    let pdfium = SHARED
+        .get_or_init(|| load_pdfium(&default_library_dir()).map_err(|e| e.to_string()))
+        .as_ref()
+        .map_err(|e| PdfError::Unavailable(e.clone()))?;
+    let _guard = SHARED_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Ok(f(pdfium))
 }
 
 /// Number of pages in a PDF document.

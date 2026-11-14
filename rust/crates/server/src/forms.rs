@@ -23,7 +23,7 @@ use crate::{errors::AppError, session::Session, state::AppState};
 pub const MAX_FORM_BYTES: usize = 10 * 1024 * 1024;
 
 /// Paths without CSRF protection: `ActionController::API` controllers (`/api` and the
-/// signing form's `view`, `click_email` and `upload` endpoints) and
+/// signing form's `view`, `click_email`, `upload` and `prefill_attachments` endpoints) and
 /// `SendSubmissionEmailController`.
 fn csrf_exempt(path: &str) -> bool {
     if path == "/api" || path.starts_with("/api/") || path == "/send_submission_email" {
@@ -31,7 +31,12 @@ fn csrf_exempt(path: &str) -> bool {
     }
     path.strip_prefix("/s/")
         .and_then(|rest| rest.split_once('/'))
-        .is_some_and(|(_, action)| matches!(action, "view" | "click_email" | "upload"))
+        .is_some_and(|(_, action)| {
+            matches!(
+                action,
+                "view" | "click_email" | "upload" | "prefill_attachments"
+            )
+        })
 }
 
 fn is_urlencoded(headers: &HeaderMap) -> bool {

@@ -27,7 +27,7 @@ loco-storage = { version = "0.1.0", path = "../storage" }
 loco-views = { version = "0.1.0", path = "../views" }
 rand = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.154", features = ["preserve_order"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
 sha2 = "0.11.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["full"] }

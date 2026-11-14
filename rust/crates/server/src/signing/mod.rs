@@ -8,7 +8,10 @@ pub mod audit;
 pub mod completion;
 pub mod downloads;
 pub mod emails;
+pub mod invite;
+pub mod metadata;
 pub mod pages;
+pub mod prefill;
 pub mod results;
 pub mod send_email;
 pub mod start_form;
@@ -45,6 +48,9 @@ pub fn router() -> Router<AppState> {
         .route("/s/{slug}/upload", post(actions::upload))
         .route("/s/{slug}/delegate", post(actions::delegate))
         .route("/s/{slug}/delegated", get(pages::delegated))
+        .route("/s/{slug}/invite", post(invite::create))
+        .route("/s/{slug}/metadata", get(metadata::index))
+        .route("/s/{slug}/prefill_attachments", post(prefill::create))
         .route("/s/{slug}/download", get(downloads::partial))
         .route("/s/{slug}/documents", get(downloads::completed))
         .route("/submitters/{key}/download", get(downloads::submitter))
@@ -56,6 +62,10 @@ pub fn router() -> Router<AppState> {
                 .patch(start_form::update),
         )
         .route("/d/{slug}/completed", get(start_form::completed))
+        .route(
+            "/start_form_self/{id}",
+            axum::routing::put(start_form::self_update).patch(start_form::self_update),
+        )
         .route("/send_submission_email", post(send_email::create))
         .route(
             "/resubmit_form",
