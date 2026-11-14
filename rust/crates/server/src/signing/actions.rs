@@ -335,7 +335,8 @@ pub async fn upload(
     };
 
     let kind = params.str("type").unwrap_or_default();
-    let mut metadata = json!({});
+    // `ActiveStorage::AnalyzeJob` marks other files analyzed (there are no analyzers).
+    let mut metadata = json!({ "identified": true, "analyzed": true });
     if kind == "initials" || kind == "signature" {
         let Some(image) = crate::images::load(&file.data, &file.content_type) else {
             return Ok(error(format!(
@@ -380,6 +381,8 @@ pub async fn upload(
         &blob,
     )
     .await?;
+    // `touch_attachment_records`
+    signing::touch_submitter(&state.db, form.submitter.id).await?;
     let origin = request_origin(&state, &headers);
     let mut response = crate::api::ok(&attachment_json(&state, &origin, &attachment, &blob));
     if params.str("remember_signature").as_deref() == Some("true")

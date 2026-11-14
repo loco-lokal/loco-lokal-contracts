@@ -46,12 +46,22 @@ pub async fn enqueue(
     submitter_id: i64,
     is_last: Option<bool>,
 ) -> anyhow::Result<()> {
+    enqueue_with(state, submitter_id, is_last, None).await
+}
+
+/// [`enqueue`] with `send_invitation_email`.
+pub async fn enqueue_with(
+    state: &AppState,
+    submitter_id: i64,
+    is_last: Option<bool>,
+    send_invitation_email: Option<bool>,
+) -> anyhow::Result<()> {
     loco_jobs::enqueue(
         &state.db,
         &ProcessSubmitterCompletion {
             submitter_id,
             is_last,
-            send_invitation_email: None,
+            send_invitation_email,
         },
         EnqueueOptions::default(),
     )

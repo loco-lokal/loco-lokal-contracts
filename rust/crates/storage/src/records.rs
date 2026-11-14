@@ -66,6 +66,24 @@ impl Blob {
         .await
     }
 
+    /// `ActiveStorage::Blob.find_by(checksum:)` (the first by id).
+    pub async fn find_by_checksum(
+        db: &PgPool,
+        checksum: &str,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as!(
+            Blob,
+            r#"
+            SELECT id, key, filename, content_type, metadata, service_name, byte_size, checksum,
+                   uuid, created_at
+            FROM active_storage_blobs WHERE checksum = $1 ORDER BY id LIMIT 1
+            "#,
+            checksum
+        )
+        .fetch_optional(db)
+        .await
+    }
+
     pub async fn find_by_uuid(db: &PgPool, uuid: &str) -> Result<Option<Self>, sqlx::Error> {
         sqlx::query_as!(
             Blob,

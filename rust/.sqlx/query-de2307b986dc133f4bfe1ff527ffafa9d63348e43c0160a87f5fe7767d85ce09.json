@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE submitters SET\n             email = $2, name = $3, phone = $4, external_id = $5, values = $6, metadata = $7,\n             preferences = $8, sent_at = $9,\n             updated_at = CASE\n               WHEN (email, name, phone, external_id, values, metadata, preferences, sent_at)\n                    IS NOT DISTINCT FROM\n                    ($2::varchar, $3::varchar, $4::varchar, $5::varchar, $6::text, $7::text,\n                     $8::text, $9::timestamp)\n               THEN updated_at ELSE (now() AT TIME ZONE 'utc') END\n           WHERE id = $1\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
+  "query": "INSERT INTO submitters\n             (submission_id, template_id, account_id, uuid, slug, email, phone, name,\n              external_id, values, metadata, preferences, sent_at, completed_at, created_at,\n              updated_at)\n           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,\n                   (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
   "describe": {
     "columns": [
       {
@@ -249,6 +249,10 @@
     "parameters": {
       "Left": [
         "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
         "Varchar",
         "Varchar",
         "Varchar",
@@ -256,6 +260,7 @@
         "Text",
         "Text",
         "Text",
+        "Timestamp",
         "Timestamp"
       ]
     },
@@ -284,5 +289,5 @@
       true
     ]
   },
-  "hash": "4664e373c13d46a291823456208dbd509b770fc7f9201556e85a1e4aab4e0f97"
+  "hash": "de2307b986dc133f4bfe1ff527ffafa9d63348e43c0160a87f5fe7767d85ce09"
 }

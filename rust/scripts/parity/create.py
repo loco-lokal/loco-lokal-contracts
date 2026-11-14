@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 from compare import RAILS, RUST
 from writes import call, check, scrub
@@ -50,8 +51,27 @@ def submission_ids(body):
 
 
 def case(token, label, path, body):
-    rails = call(RAILS, token, "POST", path, body)
-    rust = call(RUST, token, "POST", path, body)
+    return case_each(token, label, path, {"rails": body, "rust": body})
+
+
+def image(seed, kind="PNG"):
+    """A signature image unique to `seed`, so that each backend creates its own blob."""
+    import base64
+    import io
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB" if kind == "JPEG" else "RGBA", (300, 100), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.line([(10, 80), (100, 20), (200, 90), (290, 15 + seed % 50)], fill=(0, 0, 0), width=5)
+    draw.point((seed % 300, 50), fill=(1, 2, 3))
+    out = io.BytesIO()
+    img.save(out, kind)
+    return base64.b64encode(out.getvalue()).decode()
+
+
+def case_each(token, label, path, bodies):
+    rails = call(RAILS, token, "POST", path, bodies["rails"])
+    rust = call(RUST, token, "POST", path, bodies["rust"])
     check(label, rails, rust)
     ids = {"rails": submission_ids(rails[1]), "rust": submission_ids(rust[1])}
     for b in ids:
@@ -59,6 +79,45 @@ def case(token, label, path, body):
     if ids["rails"] or ids["rust"]:
         for table, column in (("submissions", "id"), ("submitters", "submission_id")):
             check(f"  {table} rows", (0, rows(table, column, ids["rails"])), (0, rows(table, column, ids["rust"])))
+        # The completion jobs may not have run yet.
+        early = lambda i: {k: v for k, v in events(i).items()
+                           if k not in ("completed_submitters", "documents", "audit_trails")}
+        check("  events", (0, early(ids["rails"])), (0, early(ids["rust"])))
+    return ids
+
+
+def events(submission_ids):
+    """The submission events (type and data) and completed submitters of the submissions."""
+    if not submission_ids:
+        return []
+    ids = ",".join(str(i) for i in submission_ids)
+    sql = (f"SELECT json_build_object("
+           f"'events', (SELECT coalesce(json_agg(json_build_array(e.event_type, e.data::json) ORDER BY e.id), '[]') "
+           f"           FROM submission_events e WHERE e.submission_id IN ({ids})), "
+           f"'completed_submitters', (SELECT count(*) FROM completed_submitters c "
+           f"                         WHERE c.submission_id IN ({ids})), "
+           f"'documents', (SELECT count(*) FROM active_storage_attachments a JOIN submitters r ON r.id = a.record_id "
+           f"              WHERE a.record_type = 'Submitter' AND a.name = 'documents' AND r.submission_id IN ({ids})), "
+           f"'audit_trails', (SELECT count(*) FROM active_storage_attachments a "
+           f"                 WHERE a.record_type = 'Submission' AND a.name = 'audit_trail' AND a.record_id IN ({ids})), "
+           f"'attachments', (SELECT coalesce(json_agg(json_build_array(r.uuid, "
+           f"                   r.values::jsonb ? a.uuid OR r.values LIKE '%' || a.uuid || '%', "
+           f"                   b.filename, b.content_type, b.metadata) ORDER BY a.id), '[]') "
+           f"                FROM active_storage_attachments a JOIN submitters r ON r.id = a.record_id "
+           f"                JOIN active_storage_blobs b ON b.id = a.blob_id "
+           f"                WHERE a.record_type = 'Submitter' AND a.name = 'attachments' AND r.submission_id IN ({ids})))")
+    out = subprocess.run(["psql", DATABASE_URL, "-Atc", sql], check=True, capture_output=True, text=True)
+    return json.loads(out.stdout)
+
+
+def completed_case(token, label, path, body):
+    """A case that completes recipients: the rows again once the completion jobs ran."""
+    ids = case(token, label, path, body)
+    time.sleep(6)
+    for table, column in (("submissions", "id"), ("submitters", "submission_id")):
+        check(f"  {table} rows after the jobs", (0, rows(table, column, ids["rails"])),
+              (0, rows(table, column, ids["rust"])))
+    check("  events after the jobs", (0, events(ids["rails"])), (0, events(ids["rust"])))
     return ids
 
 
@@ -123,6 +182,56 @@ def main():
                                {"role": "Second Party", "invite_by": "First Party"}]})
     case(token, "emails sent", "/api/submissions/emails", {**sending, "emails": "es@example.com"})
 
+    # Recipients created completed.
+    completed_case(token, "completed submitter", "/api/submissions", {
+        **base, "submitters": [{"role": "First Party", "email": "done@example.com", "completed": True,
+                                "values": {"Full Name": "Done Already"}},
+                               {"role": "Second Party", "email": "next@example.com"}]})
+    completed_case(token, "completed all parties", "/api/submissions", {
+        **base, "submitters": [{"role": "First Party", "email": "all1@example.com", "completed": True,
+                                "values": {"Full Name": "All One", "Plan": "Basic"}},
+                               {"role": "Second Party", "email": "all2@example.com", "completed": "true",
+                                "values": {"Approver": "All Two"}}]})
+    completed_case(token, "completed with defaults", "/api/submissions", {
+        **base, "submitters": [{"role": "First Party", "email": "def@example.com", "completed": "false",
+                                "fields": [{"name": "Full Name", "default_value": "{{submitter.email}}"},
+                                           {"name": "Start Date", "default_value": "{{date}}"}]}]})
+    case(token, "completed false", "/api/submissions", {
+        **base, "submitters": [{"role": "First Party", "email": "nf@example.com", "completed": False}]})
+
+    # Prefilled attachments.
+    def signed(b, kind="PNG", prefix="data:image/png;base64,"):
+        seed = 7 if b == "rails" else 8
+        return {**base, "submitters": [
+            {"role": "First Party", "email": "sig@example.com", "values": {"Signature": prefix + image(seed, kind)}},
+            {"role": "Second Party", "email": "sig2@example.com",
+             "values": {"Countersignature": image(seed + 100, kind)}}]}
+    case_each(token, "prefill base64 signatures", "/api/submissions", {b: signed(b) for b in CREATED})
+    case_each(token, "prefill jpeg signature", "/api/submissions",
+              {b: signed(b, "JPEG", "data:image/jpeg;base64,") for b in CREATED})
+    completed_case(token, "completed with a signature", "/api/submissions", {
+        **base, "submitters": [{"role": "First Party", "email": "cs@example.com", "completed": True,
+                                "values": {"Full Name": "Signed", "Signature": image(31)}}]})
+    url = "https://raw.githubusercontent.com/loco-lokal/loco-lokal-contracts/main/public/loco-lokal-icon.png"
+    case(token, "prefill signature url", "/api/submissions", {
+        **base, "submitters": [{"role": "First Party", "email": "url@example.com", "values": {"Signature": url}}]})
+    for label, value in (("http url", "http://example.com/sig.png"), ("localhost url", "https://localhost/sig.png"),
+                         ("dangerous url", "https://example.com/sig.exe"),
+                         ("missing url", "https://raw.githubusercontent.com/loco-lokal/no-such-repo/main/x.png"),
+                         ("invalid base64", "not an image " * 6)):
+        case(token, f"prefill {label}", "/api/submissions", {
+            **base, "submitters": [{"role": "First Party", "email": "err@example.com",
+                                    "values": {"Signature": value}}]})
+
+    # Unported: Rails renders the text in a font (`GenerateFontImage`).
+    status, body = call(RUST, token, "POST", "/api/submissions", {
+        **base, "submitters": [{"role": "First Party", "email": "t@example.com", "values": {"Signature": "Ana"}}]})
+    unported = status == 422 and "not supported yet" in str(body)
+    print(f"{'ok  ' if unported else 'FAIL'} prefill text signature (Rust only) [{status}] {body}")
+    if not unported:
+        import writes
+        writes.FAILURES += 1
+
     # Errors.
     case(token, "no submitters", "/api/submissions", {**base})
     case(token, "invalid email", "/api/submissions", {**base, "submitters": [{"email": "nope"}]})
@@ -156,15 +265,29 @@ def main():
                                              "readonly": True}], "phone": "+1 555 0100"}),
         ("PUT submitter unknown field", {"values": {"Nope": "x"}}),
         ("PUT submitter message", {"message": {"subject": "Again", "body": "Body"}}),
+        ("PUT submitter signature", "signature"),
+        ("PUT submitter same signature", "signature"),
+        ("PUT submitter completed", {"completed": True, "values": {"Full Name": "Completed Now"},
+                                     "fields": [{"name": "Start Date", "default_value": "{{date}}"}]}),
+        ("PUT submitter completed again", {"completed": True}),
     ):
-        rails = call(RAILS, token, "PUT", f"/api/submitters/{ids['rails']}", update)
-        rust = call(RUST, token, "PUT", f"/api/submitters/{ids['rust']}", update)
+        bodies = {b: update for b in ids}
+        if update == "signature":
+            bodies = {b: {"values": {"Signature": image(50 if b == "rails" else 51)}} for b in ids}
+        rails = call(RAILS, token, "PUT", f"/api/submitters/{ids['rails']}", bodies["rails"])
+        rust = call(RUST, token, "PUT", f"/api/submitters/{ids['rust']}", bodies["rust"])
         check(label, rails, rust)
         check("  submitter row", (0, rows("submitters", "id", [ids["rails"]])),
               (0, rows("submitters", "id", [ids["rust"]])))
         sub = {b: rows("submitters", "id", [ids[b]])[0]["submission_id"] for b in ids}
         check("  submission row", (0, rows("submissions", "id", [sub["rails"]])),
               (0, rows("submissions", "id", [sub["rust"]])))
+        check("  attachments", (0, events([sub["rails"]])["attachments"]), (0, events([sub["rust"]])["attachments"]))
+        if label == "PUT submitter completed":
+            time.sleep(6)
+            check("  events after the jobs", (0, events([sub["rails"]])), (0, events([sub["rust"]])))
+            check("  submitter rows after the jobs", (0, rows("submitters", "submission_id", [sub["rails"]])),
+                  (0, rows("submitters", "submission_id", [sub["rust"]])))
 
     for b, url in (("rails", RAILS), ("rust", RUST)):
         for sid in CREATED[b]:

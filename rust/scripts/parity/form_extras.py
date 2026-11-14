@@ -57,7 +57,8 @@ def stored(submission_id):
         'submitters', (SELECT json_agg(json_build_object(
             'uuid', r.uuid, 'email', r.email, 'template_id', r.template_id = s.template_id,
             'values', r.values, 'completed', r.completed_at IS NOT NULL, 'sent', r.sent_at IS NOT NULL,
-            'attachments', (SELECT coalesce(json_agg(json_build_array(a.name, b.content_type, b.filename)
+            'touched', r.updated_at > r.created_at,
+            'attachments', (SELECT coalesce(json_agg(json_build_array(a.name, b.content_type, b.filename, CASE WHEN a.name = 'attachments' THEN b.metadata END)
                                                      ORDER BY a.id), '[]')
                             FROM active_storage_attachments a JOIN active_storage_blobs b ON b.id = a.blob_id
                             WHERE a.record_type = 'Submitter' AND a.record_id = r.id),
@@ -164,6 +165,9 @@ def main():
             {"file": ("signature.png", "image/png", signature_png())},
         )
         steps["remember cookie"] = (200, json.dumps(cookie(browser)), None)
+        pdf = (ROOT / "spec/fixtures/sample-document.pdf").read_bytes()
+        steps["upload file"] = browser.request(
+            "POST", f"/s/{s}/upload", [("type", "file")], {"file": ("contract.pdf", "application/pdf", pdf)})
         signature_uuid = json.loads(steps["upload remembered"][1])["uuid"]
         steps["save draft"] = browser.request(
             "POST", f"/s/{s}",

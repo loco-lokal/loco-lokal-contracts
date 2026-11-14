@@ -79,14 +79,17 @@ pub async fn create(
     let attachment = match existing {
         Some(attachment) => attachment,
         None => {
-            Attachment::create(
+            let attachment = Attachment::create(
                 &state.db,
                 "Submitter",
                 form.submitter.id,
                 "attachments",
                 &blob,
             )
-            .await?
+            .await?;
+            // `touch_attachment_records`
+            loco_db::signing::touch_submitter(&state.db, form.submitter.id).await?;
+            attachment
         }
     };
     blob.ensure_uuid(&state.db).await?;

@@ -9,6 +9,7 @@
 //! prefilled signature, image and file values, and templates with dynamic documents
 //! (Phase 5).
 
+pub(crate) mod attachments;
 pub(crate) mod email;
 mod submitter;
 mod validate;
@@ -23,7 +24,7 @@ use axum::{
 };
 use chrono::{Days, Months, NaiveDateTime, Utc};
 use loco_db::{
-    JsonText,
+    JsonText, signing,
     submissions::{self, NewSubmission, NewSubmitter, Submission, Submitter},
     templates::Template,
 };
@@ -41,6 +42,7 @@ use super::{
 use crate::{
     auth::{ApiAuth, Auth},
     errors::AppError,
+    request::ClientIp,
     state::AppState,
     webhooks::{self, EventRecord},
 };
@@ -322,7 +324,7 @@ fn normalize_submitter_params(
     template_submitters: &[Value],
     index: usize,
     for_submitter_uuid: Option<&str>,
-) -> Result<(), Invalid> {
+) -> Result<Vec<values::Pending>, Invalid> {
     let with_values = !blank(submitter.get("values"));
     let mut defaults: Map<String, Value> = if with_values {
         submitter
@@ -344,7 +346,7 @@ fn normalize_submitter_params(
         }
     }
     if defaults.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let role = cast_string(submitter.get("role"));
@@ -366,7 +368,7 @@ fn normalize_submitter_params(
         .and_then(Value::as_array)
         .map(|r| r.iter().map(ruby_to_s).collect());
 
-    let normalized = values::normalize(
+    let (normalized, pending) = values::normalize(
         &values::Target {
             template_fields,
             template_submitters,
@@ -378,7 +380,7 @@ fn normalize_submitter_params(
         !with_values,
     )?;
     submitter.insert("values".into(), Value::Object(normalized));
-    Ok(())
+    Ok(pending)
 }
 
 // --- CreateFromSubmitters ----------------------------------------------------------------
@@ -407,6 +409,7 @@ struct DraftSubmitter {
     metadata: Value,
     preferences: Map<String, Value>,
     sent: bool,
+    completed_at: Option<NaiveDateTime>,
 }
 
 /// `find_submitter_uuid`.
@@ -775,7 +778,7 @@ async fn build_submitter(
     uuid: String,
     is_order_sent: bool,
     preferences: &Map<String, Value>,
-) -> Result<(), AppError> {
+) -> Result<Result<(), Invalid>, AppError> {
     let email = attrs
         .get("email")
         .filter(|e| !blank(Some(e)))
@@ -816,12 +819,43 @@ async fn build_submitter(
     prefs.shift_remove("bcc_completed");
     let send =
         prefs.get("send_email") != Some(&Value::Bool(false)) && email.is_some() && is_order_sent;
+    let name = cast_string(attrs.get("name"));
+
+    // `completed_at: attrs[:completed].present? ? Time.current : nil` and
+    // `assign_completed_attributes`, over the recipients built so far.
+    let completed_at = (!blank(attrs.get("completed"))).then(|| Utc::now().naive_utc());
+    if completed_at.is_some() {
+        let form = draft_form(
+            auth,
+            draft,
+            template,
+            &DraftSubmitter {
+                uuid: uuid.clone(),
+                email: email.clone(),
+                phone: Some(phone.clone()),
+                name: name.clone(),
+                external_id: None,
+                values: stored_values.clone(),
+                metadata: json!({}),
+                preferences: prefs.clone(),
+                sent: send,
+                completed_at: None,
+            },
+        );
+        match crate::signing::submit::assign_completed_values(state, &form, None).await? {
+            Ok(values) => stored_values = values,
+            Err(
+                crate::signing::submit::SubmitError::Invalid(message)
+                | crate::signing::submit::SubmitError::Required(message),
+            ) => return Ok(Err(Invalid(message))),
+        }
+    }
 
     draft.submitters.push(DraftSubmitter {
         uuid,
         email,
         phone: Some(phone),
-        name: cast_string(attrs.get("name")),
+        name,
         external_id: present_str(attrs.get("external_id"))
             .or_else(|| cast_string(attrs.get("application_key"))),
         values: stored_values,
@@ -832,8 +866,77 @@ async fn build_submitter(
             .unwrap_or_else(|| json!({})),
         preferences: prefs,
         sent: send,
+        completed_at,
     });
-    Ok(())
+    Ok(Ok(()))
+}
+
+/// The submission being built as a [`Form`] for `assign_completed_attributes`, with
+/// `current` as its submitter after the ones built so far. Unsaved records have id 0.
+fn draft_form(
+    auth: &Auth,
+    draft: &Draft,
+    template: &Template,
+    current: &DraftSubmitter,
+) -> crate::signing::Form {
+    let now = Utc::now().naive_utc();
+    let to_submitter = |s: &DraftSubmitter| Submitter {
+        id: 0,
+        submission_id: 0,
+        uuid: s.uuid.clone(),
+        email: s.email.clone(),
+        slug: String::new(),
+        values: JsonText(Value::Object(s.values.clone())),
+        ua: None,
+        ip: None,
+        sent_at: None,
+        opened_at: None,
+        completed_at: s.completed_at,
+        created_at: now,
+        updated_at: now,
+        name: s.name.clone(),
+        phone: s.phone.clone(),
+        external_id: s.external_id.clone(),
+        preferences: JsonText(Value::Object(s.preferences.clone())),
+        metadata: JsonText(s.metadata.clone()),
+        account_id: auth.account.id,
+        declined_at: None,
+        timezone: None,
+        template_id: Some(template.id),
+    };
+    let submitter = to_submitter(current);
+    let mut submitters: Vec<Submitter> = draft.submitters.iter().map(to_submitter).collect();
+    submitters.push(submitter.clone());
+    crate::signing::Form {
+        submitter,
+        submission: Submission {
+            id: 0,
+            template_id: Some(template.id),
+            created_by_user_id: Some(auth.user.id),
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+            template_fields: draft
+                .template_fields
+                .as_ref()
+                .map(|f| JsonText(Value::Array(f.clone()))),
+            template_schema: draft.template_schema.clone().map(JsonText),
+            template_submitters: Some(JsonText(Value::Array(draft.template_submitters.clone()))),
+            source: "api".to_owned(),
+            submitters_order: String::new(),
+            slug: String::new(),
+            preferences: JsonText(Value::Object(draft.preferences.clone())),
+            account_id: auth.account.id,
+            expire_at: draft.expire_at,
+            name: draft.name.clone(),
+            variables_schema: draft.variables_schema.clone().map(JsonText),
+            variables: Some(JsonText(draft.variables.clone())),
+            completed_at: None,
+        },
+        template: Some(template.clone()),
+        account: auth.account.clone(),
+        submitters,
+    }
 }
 
 /// `maybe_add_invite_submitters`.
@@ -946,7 +1049,8 @@ async fn add_cc_submitters(
             random_order,
             &cc_preferences,
         )
-        .await?;
+        .await?
+        .map_err(|Invalid(message)| anyhow::anyhow!(message))?;
     }
     Ok(())
 }
@@ -1047,10 +1151,7 @@ fn viewer_flags<'a>(
 }
 
 /// Rejects what the Rust server cannot do yet.
-fn unsupported(template: &Template, submitters: &[Map<String, Value>]) -> Result<(), Invalid> {
-    if submitters.iter().any(|s| !blank(s.get("completed"))) {
-        return Err("Creating completed submitters is not supported yet".into());
-    }
+fn unsupported(template: &Template) -> Result<(), Invalid> {
     let dynamic = array(Some(&template.schema))
         .iter()
         .any(|e| !blank(e.get("dynamic")));
@@ -1083,7 +1184,7 @@ async fn build_from_submitters(
             .iter()
             .filter_map(|v| v.as_object().cloned())
             .collect();
-        if let Err(e) = unsupported(template, &given_submitters) {
+        if let Err(e) = unsupported(template) {
             return Ok(Err(e));
         }
         let submission_preferences = merge(
@@ -1167,6 +1268,14 @@ async fn build_from_submitters(
                 {
                     continue;
                 }
+                if !blank(submitter_attrs.get("completed"))
+                    && draft
+                        .template_fields
+                        .as_ref()
+                        .is_none_or(|f| blank(Some(&Value::Array(f.clone()))))
+                {
+                    draft.template_fields = Some(array(Some(&template.fields)).to_vec());
+                }
                 let found = template_submitters
                     .iter()
                     .find(|e| str_of(e, "uuid") == Some(uuid.as_str()))
@@ -1193,7 +1302,7 @@ async fn build_from_submitters(
                 .unwrap_or_else(|| i64::try_from(index).unwrap_or(i64::MAX));
             let is_order_sent = submitters_order == "random" || position == 0;
             draft.template_submitters.push(template_submitter);
-            build_submitter(
+            if let Err(e) = build_submitter(
                 state,
                 auth,
                 &mut draft,
@@ -1203,7 +1312,10 @@ async fn build_from_submitters(
                 is_order_sent,
                 &submitter_preferences,
             )
-            .await?;
+            .await?
+            {
+                return Ok(Err(e));
+            }
         }
 
         let variables_present = !blank(Some(&draft.variables));
@@ -1262,7 +1374,7 @@ async fn build_from_emails(
     emails: &Value,
     mark_as_sent: bool,
 ) -> Result<Result<Vec<Draft>, Invalid>, AppError> {
-    if let Err(e) = unsupported(template, &[]) {
+    if let Err(e) = unsupported(template) {
         return Ok(Err(e));
     }
     let params_map = params.as_object().cloned().unwrap_or_default();
@@ -1307,6 +1419,7 @@ async fn build_from_emails(
                 metadata: json!({}),
                 preferences: preferences.clone(),
                 sent: mark_as_sent,
+                completed_at: None,
             }],
         };
         assign_submitters_is_viewer(&mut draft, template);
@@ -1367,6 +1480,7 @@ async fn save(
                         metadata: JsonText(s.metadata),
                         preferences: JsonText(Value::Object(s.preferences)),
                         sent_at: s.sent.then_some(now),
+                        completed_at: s.completed_at,
                     },
                 )
                 .await?,
@@ -1472,11 +1586,12 @@ async fn send_submission_requests(state: &AppState, saved: &[(Submission, Vec<Su
 async fn create_submissions(
     state: &AppState,
     auth: &Auth,
-    headers: &HeaderMap,
-    uri: &Uri,
+    request: &Request<'_>,
     template_id: Option<String>,
     mut params: Value,
 ) -> Result<Response, AppError> {
+    let (headers, uri) = (request.headers, request.uri);
+    let mut new_attachments: Vec<attachments::NewAttachment> = Vec::new();
     // `load_and_authorize_resource :template` loads the parent by `template_id`; the
     // path parameter is part of `params`.
     if let (Some(id), Some(map)) = (&template_id, params.as_object_mut()) {
@@ -1548,14 +1663,35 @@ async fn create_submissions(
                     continue;
                 };
                 let index = submitter_index(map).unwrap_or(index);
-                if let Err(Invalid(message)) = normalize_submitter_params(
+                let pending = match normalize_submitter_params(
                     map,
                     &template_fields,
                     &template_submitters,
                     index,
                     None,
                 ) {
-                    return Ok(unprocessable(&message));
+                    Ok(pending) => pending,
+                    Err(Invalid(message)) => return Ok(unprocessable(&message)),
+                };
+                if !pending.is_empty() {
+                    let mut values = map
+                        .get("values")
+                        .and_then(Value::as_object)
+                        .cloned()
+                        .unwrap_or_default();
+                    match attachments::resolve(
+                        state,
+                        template.account_id,
+                        None,
+                        pending,
+                        &mut values,
+                    )
+                    .await?
+                    {
+                        Ok(created) => new_attachments.extend(created),
+                        Err(message) => return Ok(unprocessable(&message)),
+                    }
+                    map.insert("values".into(), Value::Object(values));
                 }
             }
         }
@@ -1572,7 +1708,22 @@ async fn create_submissions(
         Err(Invalid(message)) => return Ok(unprocessable(&message)),
     };
 
-    let saved = save(state, auth, &template, drafts, "api", &submitters_order).await?;
+    let mut saved = save(state, auth, &template, drafts, "api", &submitters_order).await?;
+    if !new_attachments.is_empty() {
+        let mut conn = state.db.acquire().await?;
+        for (_, list) in &saved {
+            for submitter in list {
+                attachments::save(&mut conn, &new_attachments, submitter).await?;
+            }
+        }
+    }
+    if !new_attachments.is_empty()
+        || saved
+            .iter()
+            .any(|(_, list)| list.iter().any(|s| s.completed_at.is_some()))
+    {
+        saved = complete_created(state, request, saved).await?;
+    }
 
     let records: Vec<EventRecord> = saved
         .iter()
@@ -1583,10 +1734,106 @@ async fn create_submissions(
         .collect();
     webhooks::enqueue(state, "submission.created", &records).await;
     send_submission_requests(state, &saved).await;
+    enqueue_completed(state, &saved).await?;
     let ids: Vec<i64> = saved.iter().map(|(s, _)| s.id).collect();
     crate::search::reindex_later(state, "Submission", &ids).await;
 
     render_created(state, auth, uri, &params, &saved).await
+}
+
+/// For the recipients created completed: `Submitters::SubmitValues.maybe_invite_via_field`
+/// and the `api_complete_form` event. Returns the submissions reloaded, with any invited
+/// recipients and the attachments' touches.
+async fn complete_created(
+    state: &AppState,
+    request: &Request<'_>,
+    saved: Vec<(Submission, Vec<Submitter>)>,
+) -> Result<Vec<(Submission, Vec<Submitter>)>, AppError> {
+    let info = crate::signing::submit::RequestInfo {
+        ip: request.ip.clone(),
+        user_agent: request
+            .headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned),
+        headers: request.headers.clone(),
+        sid: None,
+        user_id: None,
+        locale: crate::locale::DEFAULT_LOCALE.to_owned(),
+    };
+    let mut reloaded = Vec::new();
+    for (submission, submitters) in saved {
+        for submitter in submitters.iter().filter(|s| s.completed_at.is_some()) {
+            let form = crate::signing::Form::for_submitter(state, submitter.clone()).await?;
+            let values = submitter.values.as_object().cloned().unwrap_or_default();
+            let mut tx = state.db.begin().await?;
+            crate::signing::submit::invite_via_field(&mut tx, state, &form, values, &info).await?;
+            let data = crate::api::submitters::tracking_data(
+                info.ip.as_deref(),
+                info.user_agent.as_deref(),
+                None,
+                None,
+                Map::new(),
+            );
+            submissions::insert_event(
+                &mut *tx,
+                submitter,
+                "api_complete_form",
+                &JsonText(Value::Object(data)),
+            )
+            .await?;
+            tx.commit().await?;
+        }
+        let submission = submissions::find(&state.db, submission.id)
+            .await?
+            .unwrap_or(submission);
+        let submitters = submissions::submitters_for(&state.db, &[submission.id]).await?;
+        reloaded.push((submission, submitters));
+    }
+    Ok(reloaded)
+}
+
+/// The completion jobs of the recipients created completed; the last one of a completed
+/// submission is `is_last`, and none sends the next invitations (they were sent).
+async fn enqueue_completed(
+    state: &AppState,
+    saved: &[(Submission, Vec<Submitter>)],
+) -> Result<(), AppError> {
+    for (submission, submitters) in saved {
+        let template_submitters = array(submission.template_submitters.as_deref()).to_vec();
+        let viewer_uuids: Vec<String> = template_submitters
+            .iter()
+            .filter(|s| !blank(s.get("is_viewer")))
+            .filter_map(|s| str_of(s, "uuid").map(str::to_owned))
+            .collect();
+        let is_viewer = |s: &Submitter| viewer_uuids.contains(&s.uuid);
+        let mut last = None;
+        if submitters
+            .iter()
+            .all(|s| is_viewer(s) || s.completed_at.is_some())
+            && signing::maybe_update_completed_at(&state.db, submission.id, &viewer_uuids).await?
+        {
+            // `max_by(&:completed_at)`: the first of the latest.
+            last = submitters
+                .iter()
+                .filter(|s| !is_viewer(s))
+                .fold(None::<&Submitter>, |best, s| match best {
+                    Some(b) if b.completed_at >= s.completed_at => Some(b),
+                    _ => Some(s),
+                })
+                .map(|s| s.id);
+        }
+        for submitter in submitters.iter().filter(|s| s.completed_at.is_some()) {
+            crate::signing::completion::enqueue_with(
+                state,
+                submitter.id,
+                Some(last == Some(submitter.id)),
+                Some(false),
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 /// `build_create_json`.
@@ -1599,8 +1846,12 @@ async fn render_created(
 ) -> Result<Response, AppError> {
     let list: Vec<Submission> = saved.iter().map(|(s, _)| s.clone()).collect();
     let by_submission = saved.iter().map(|(s, r)| (s.id, r.clone())).collect();
-    let data =
-        SubmissionData::with_submitters(state, &list, by_submission, Load::default()).await?;
+    // `values` link prefilled attachments.
+    let load = Load {
+        attachments: true,
+        ..Load::default()
+    };
+    let data = SubmissionData::with_submitters(state, &list, by_submission, load).await?;
     let urls = Urls::new(state, auth.account.id).await?;
     let include_fields = params
         .get("include")
@@ -1639,43 +1890,64 @@ async fn render_created(
 pub async fn create(
     State(state): State<AppState>,
     ApiAuth(auth): ApiAuth,
+    ClientIp(ip): ClientIp,
     headers: HeaderMap,
     uri: Uri,
     params: Params,
 ) -> Result<Response, AppError> {
-    create_submissions(&state, &auth, &headers, &uri, None, params.0).await
+    let request = Request {
+        ip,
+        headers: &headers,
+        uri: &uri,
+    };
+    create_submissions(&state, &auth, &request, None, params.0).await
 }
 
 /// `POST /api/submissions/init`.
 pub async fn create_init(
     state: State<AppState>,
     auth: ApiAuth,
+    ip: ClientIp,
     headers: HeaderMap,
     uri: Uri,
     params: Params,
 ) -> Result<Response, AppError> {
-    create(state, auth, headers, uri, params).await
+    create(state, auth, ip, headers, uri, params).await
 }
 
 /// `POST /api/submissions/emails`.
 pub async fn create_emails(
     state: State<AppState>,
     auth: ApiAuth,
+    ip: ClientIp,
     headers: HeaderMap,
     uri: Uri,
     params: Params,
 ) -> Result<Response, AppError> {
-    create(state, auth, headers, uri, params).await
+    create(state, auth, ip, headers, uri, params).await
 }
 
 /// `POST /api/templates/:template_id/submissions`.
 pub async fn create_for_template(
     State(state): State<AppState>,
     ApiAuth(auth): ApiAuth,
+    ClientIp(ip): ClientIp,
     headers: HeaderMap,
     uri: Uri,
     Path(id): Path<String>,
     params: Params,
 ) -> Result<Response, AppError> {
-    create_submissions(&state, &auth, &headers, &uri, Some(id), params.0).await
+    let request = Request {
+        ip,
+        headers: &headers,
+        uri: &uri,
+    };
+    create_submissions(&state, &auth, &request, Some(id), params.0).await
+}
+
+/// What `create_submissions` reads from the request.
+struct Request<'a> {
+    ip: Option<String>,
+    headers: &'a HeaderMap,
+    uri: &'a Uri,
 }

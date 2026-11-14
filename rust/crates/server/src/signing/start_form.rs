@@ -319,7 +319,10 @@ async fn render_show(
                 ("class", Some("base-input input-error".into())),
                 (
                     "placeholder",
-                    Some(placeholder("provide_your_name_to_start", "provide_your_name")),
+                    Some(placeholder(
+                        "provide_your_name_to_start",
+                        "provide_your_name",
+                    )),
                 ),
                 ("type", Some("text".into())),
                 ("name", Some("submitter[name]".into())),
@@ -336,7 +339,10 @@ async fn render_show(
                 ("class", Some("base-input input-error".into())),
                 (
                     "placeholder",
-                    Some(placeholder("provide_your_email_to_start", "provide_your_email")),
+                    Some(placeholder(
+                        "provide_your_email_to_start",
+                        "provide_your_email",
+                    )),
                 ),
                 ("type", Some("email".into())),
                 ("name", Some("submitter[email]".into())),
@@ -658,6 +664,7 @@ async fn create_submission(
             metadata: JsonText(party.metadata),
             preferences: JsonText(party.preferences),
             sent_at: None,
+            completed_at: None,
         },
     )
     .await?;
@@ -693,6 +700,7 @@ async fn create_submission(
                 metadata: JsonText(json!({})),
                 preferences: JsonText(json!({})),
                 sent_at: None,
+                completed_at: None,
             },
         )
         .await?;
