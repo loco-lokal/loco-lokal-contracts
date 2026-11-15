@@ -69,6 +69,17 @@ def image(seed, kind="PNG"):
     return base64.b64encode(out.getvalue()).decode()
 
 
+def settled(read, rails_ids, rust_ids, timeout=15):
+    """`read` for each backend, read again while they differ: the email and completion jobs
+    run asynchronously in Sidekiq and the Rust worker, so either backend may still be behind."""
+    deadline = time.monotonic() + timeout
+    while True:
+        rails, rust = read(rails_ids), read(rust_ids)
+        if scrub(rails) == scrub(rust) or time.monotonic() > deadline:
+            return (0, rails), (0, rust)
+        time.sleep(1)
+
+
 def case_each(token, label, path, bodies):
     rails = call(RAILS, token, "POST", path, bodies["rails"])
     rust = call(RUST, token, "POST", path, bodies["rust"])
@@ -82,7 +93,7 @@ def case_each(token, label, path, bodies):
         # The completion jobs may not have run yet.
         early = lambda i: {k: v for k, v in events(i).items()
                            if k not in ("completed_submitters", "documents", "audit_trails")}
-        check("  events", (0, early(ids["rails"])), (0, early(ids["rust"])))
+        check("  events", *settled(early, ids["rails"], ids["rust"]))
     return ids
 
 
@@ -117,7 +128,7 @@ def completed_case(token, label, path, body):
     for table, column in (("submissions", "id"), ("submitters", "submission_id")):
         check(f"  {table} rows after the jobs", (0, rows(table, column, ids["rails"])),
               (0, rows(table, column, ids["rust"])))
-    check("  events after the jobs", (0, events(ids["rails"])), (0, events(ids["rust"])))
+    check("  events after the jobs", *settled(events, ids["rails"], ids["rust"]))
     return ids
 
 
@@ -315,7 +326,7 @@ def main():
         check("  attachments", (0, events([sub["rails"]])["attachments"]), (0, events([sub["rust"]])["attachments"]))
         if label == "PUT submitter completed":
             time.sleep(6)
-            check("  events after the jobs", (0, events([sub["rails"]])), (0, events([sub["rust"]])))
+            check("  events after the jobs", *settled(events, [sub["rails"]], [sub["rust"]]))
             check("  submitter rows after the jobs", (0, rows("submitters", "submission_id", [sub["rails"]])),
                   (0, rows("submitters", "submission_id", [sub["rust"]])))
 
