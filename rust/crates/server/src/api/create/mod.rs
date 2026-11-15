@@ -147,6 +147,45 @@ fn rails_json(value: &Value) -> String {
     super::rails_json(value)
 }
 
+/// `EmailMessages::MIN_BODY_SIZE`.
+const MIN_BODY_SIZE: usize = 2 * 1024;
+/// `EmailMessages::MIN_ASSET_SIZE`.
+const MIN_ASSET_SIZE: usize = 256;
+
+/// `EmailMessages::ASSET_REGEXP`: runs of `<style>` elements, or base64 data URIs (the
+/// prefix and the data).
+static ASSET_REGEXP: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?is:<style[^>]*>.*?</style>(?:\s*<style[^>]*>.*?</style>)*)|(data:[^,]*;base64,)([A-Za-z0-9+/=]+)",
+    )
+    .expect("valid regex")
+});
+
+/// `EmailMessages.maybe_extract_assets`: in bodies of 2 KB or more, styles and base64 data
+/// of 256 bytes or more are replaced by `[[asset:sha1]]` placeholders. Returns the body and
+/// the `(sha1, data)` of the assets, the first of each.
+fn extract_assets(body: &str) -> (String, Vec<(String, String)>) {
+    if body.trim().is_empty() || body.len() < MIN_BODY_SIZE {
+        return (body.to_owned(), Vec::new());
+    }
+    let mut assets: Vec<(String, String)> = Vec::new();
+    let result = ASSET_REGEXP.replace_all(body, |c: &regex::Captures<'_>| {
+        let (prefix, data) = match (c.get(1), c.get(2)) {
+            (Some(prefix), Some(data)) => (prefix.as_str(), data.as_str()),
+            _ => ("", &c[0]),
+        };
+        if data.trim().is_empty() || data.len() < MIN_ASSET_SIZE {
+            return c[0].to_owned();
+        }
+        let sha1 = hex::encode(Sha1::digest(data.as_bytes()));
+        if !assets.iter().any(|(s, _)| *s == sha1) {
+            assets.push((sha1.clone(), data.to_owned()));
+        }
+        format!("{prefix}[[asset:{sha1}]]")
+    });
+    (result.into_owned(), assets)
+}
+
 /// `Submitters.normalize_preferences`. Creates the email message a custom subject or
 /// body needs.
 async fn normalize_preferences(
@@ -174,7 +213,9 @@ async fn normalize_preferences(
                 .t("en", "you_are_invited_to_sign_a_document", &[])
         });
         let subject = strip(Some(subject)).unwrap_or_default();
-        let body = strip(message.get("body").map(ruby_to_s)).unwrap_or_default();
+        let raw_body = message.get("body").map(ruby_to_s).unwrap_or_default();
+        let (body, assets) = extract_assets(&raw_body);
+        let body = strip(Some(body)).unwrap_or_default();
         let sha1 = hex::encode(Sha1::digest(
             rails_json(&json!({ "subject": subject, "body": body })).as_bytes(),
         ));
@@ -185,6 +226,7 @@ async fn normalize_preferences(
             &subject,
             &body,
             &sha1,
+            &assets,
         )
         .await?;
         preferences.insert("email_message_uuid".into(), uuid.into());

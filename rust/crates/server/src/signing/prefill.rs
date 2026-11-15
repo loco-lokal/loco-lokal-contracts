@@ -76,21 +76,20 @@ pub async fn create(
     let mut blob = Blob::find(&state.db, source.blob_id)
         .await?
         .ok_or_else(not_found)?;
-    let attachment = match existing {
-        Some(attachment) => attachment,
-        None => {
-            let attachment = Attachment::create(
-                &state.db,
-                "Submitter",
-                form.submitter.id,
-                "attachments",
-                &blob,
-            )
-            .await?;
-            // `touch_attachment_records`
-            loco_db::signing::touch_submitter(&state.db, form.submitter.id).await?;
-            attachment
-        }
+    let attachment = if let Some(attachment) = existing {
+        attachment
+    } else {
+        let attachment = Attachment::create(
+            &state.db,
+            "Submitter",
+            form.submitter.id,
+            "attachments",
+            &blob,
+        )
+        .await?;
+        // `touch_attachment_records`
+        loco_db::signing::touch_submitter(&state.db, form.submitter.id).await?;
+        attachment
     };
     blob.ensure_uuid(&state.db).await?;
     let origin = request_origin(&state, &headers);

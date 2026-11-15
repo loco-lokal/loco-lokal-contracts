@@ -727,8 +727,8 @@ pub async fn update_snapshots(
     Ok(())
 }
 
-/// `EmailMessages.find_or_create_for_account_user` without asset extraction: the
-/// message with this subject and body, by `sha1`. Returns its uuid.
+/// `EmailMessages.find_or_create_for_account_user`: the message with this subject and
+/// body, by `sha1`, created with its extracted `(sha1, data)` assets. Returns its uuid.
 pub async fn find_or_create_email_message(
     db: impl PgExecutor<'_> + Copy,
     account_id: i64,
@@ -736,6 +736,7 @@ pub async fn find_or_create_email_message(
     subject: &str,
     body: &str,
     sha1: &str,
+    assets: &[(String, String)],
 ) -> Result<String, DbError> {
     if let Some(uuid) = sqlx::query_scalar!(
         "SELECT uuid FROM email_messages WHERE account_id = $1 AND sha1 = $2 ORDER BY id LIMIT 1",
@@ -747,7 +748,7 @@ pub async fn find_or_create_email_message(
     {
         return Ok(uuid);
     }
-    Ok(sqlx::query_scalar!(
+    let uuid = sqlx::query_scalar!(
         r#"INSERT INTO email_messages
              (account_id, author_id, subject, body, sha1, uuid, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
@@ -760,7 +761,21 @@ pub async fn find_or_create_email_message(
         uuid::Uuid::new_v4().to_string(),
     )
     .fetch_one(db)
-    .await?)
+    .await?;
+    // `save_new_assets!`: existing assets of the account are kept.
+    for (asset_sha1, data) in assets {
+        sqlx::query!(
+            r#"INSERT INTO email_message_assets (account_id, data, sha1, created_at, updated_at)
+               VALUES ($1, $2, $3, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
+               ON CONFLICT (account_id, sha1) DO NOTHING"#,
+            account_id,
+            data,
+            asset_sha1
+        )
+        .execute(db)
+        .await?;
+    }
+    Ok(uuid)
 }
 
 /// An account's email message by uuid: `(subject, body)`.

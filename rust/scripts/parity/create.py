@@ -223,6 +223,36 @@ def main():
             **base, "submitters": [{"role": "First Party", "email": "err@example.com",
                                     "values": {"Signature": value}}]})
 
+    # A message body of 2 KB or more: styles and base64 images become stored assets.
+    style = "<style>" + "p { color: #123456; margin: 0 }\n" * 20 + "</style>\n  <style>b { x: 1 }</style>"
+    small = "<img src=\"data:image/png;base64," + "QUJD" * 10 + "\">"
+    large = "<img src=\"data:image/png;base64," + image(77) + "\">"
+    body_text = style + "<p>Hello {{submitter.name}}</p>" + small + large + large + "<p>" + "x" * 1500 + "</p>"
+    messages = {}
+    for b, url in (("rails", RAILS), ("rust", RUST)):
+        status, created = call(url, token, "POST", "/api/submissions", {
+            **base, "message": {"subject": "Assets", "body": body_text},
+            "submitters": [{"role": "First Party", "email": f"assets-{b}@example.com"}]})
+        assert status == 200, created
+        CREATED[b].add(created[0]["submission_id"])
+        uuid = created[0]["preferences"]["email_message_uuid"] if "preferences" in created[0] else None
+        sql = (f"SELECT json_build_object('message', (SELECT json_build_array(m.subject, m.body, m.sha1) "
+               f"FROM email_messages m WHERE m.account_id = s.account_id AND m.uuid = "
+               f"(SELECT r.preferences::json->>'email_message_uuid' FROM submitters r WHERE r.id = {int(created[0]['id'])})), "
+               f"'assets', (SELECT coalesce(json_agg(json_build_array(a.sha1, a.data) ORDER BY a.id), '[]') "
+               f"FROM email_message_assets a WHERE a.account_id = s.account_id "
+               f"AND a.created_at > now() AT TIME ZONE 'utc' - interval '1 minute')) "
+               f"FROM submissions s WHERE s.id = {int(created[0]['submission_id'])}")
+        out = subprocess.run(["psql", DATABASE_URL, "-Atc", sql], check=True, capture_output=True, text=True)
+        messages[b] = json.loads(out.stdout)
+        del uuid
+        # Each backend creates the message and its assets itself.
+        subprocess.run(["psql", DATABASE_URL, "-Atc",
+                        "DELETE FROM email_message_assets WHERE created_at > now() AT TIME ZONE 'utc' - interval '1 minute';"
+                        "DELETE FROM email_messages WHERE subject = 'Assets'"], check=True, capture_output=True)
+    print(f"  ({len(messages['rails']['assets'])} assets)")
+    check("message assets", (0, messages["rails"]), (0, messages["rust"]))
+
     # Unported: Rails renders the text in a font (`GenerateFontImage`).
     status, body = call(RUST, token, "POST", "/api/submissions", {
         **base, "submitters": [{"role": "First Party", "email": "t@example.com", "values": {"Signature": "Ana"}}]})
