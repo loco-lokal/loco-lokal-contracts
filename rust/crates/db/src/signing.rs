@@ -720,3 +720,16 @@ pub async fn touch_submitter(db: impl PgExecutor<'_>, id: i64) -> Result<(), DbE
     .await?;
     Ok(())
 }
+
+/// `CompletedDocument.exists?(sha256:)`.
+pub async fn completed_document_exists(
+    db: impl PgExecutor<'_>,
+    sha256: &str,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM completed_documents WHERE sha256 = $1) AS "exists!""#,
+        sha256
+    )
+    .fetch_one(db)
+    .await?)
+}

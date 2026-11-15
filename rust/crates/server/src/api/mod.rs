@@ -9,6 +9,7 @@ pub mod submissions;
 pub mod submitters;
 pub mod templates;
 pub mod time;
+pub mod tools;
 
 use axum::{
     Router,
@@ -35,6 +36,8 @@ pub const MAX_LIMIT: i64 = 100;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/user", get(user))
+        .route("/api/tools/merge", post(tools::merge))
+        .route("/api/tools/verify", post(tools::verify))
         .route("/api/templates", get(templates::index))
         .route(
             "/api/templates/{id}",

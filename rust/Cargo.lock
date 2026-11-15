@@ -1787,6 +1787,7 @@ dependencies = [
  "pdfium-render",
  "rcgen",
  "rsa",
+ "sha1",
  "sha2 0.11.1",
  "skrifa",
  "subsetter",

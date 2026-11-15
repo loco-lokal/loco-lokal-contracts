@@ -114,7 +114,7 @@ fn other_known_type(data: &[u8]) -> bool {
 
 /// `Base64.decode64`: characters outside the alphabet are skipped, decoding stops at the
 /// padding, and trailing bits that don't make a byte are dropped.
-fn decode64(value: &str) -> Vec<u8> {
+pub(crate) fn decode64(value: &str) -> Vec<u8> {
     let mut clean: String = value
         .chars()
         .take_while(|c| *c != '=')

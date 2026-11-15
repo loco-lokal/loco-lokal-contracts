@@ -11,6 +11,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 lopdf = { version = "0.47.0", default-features = false }
 pdfium-render = "0.9.5"
 rsa = { version = "0.9.10", features = ["pem"] }
+sha1 = "0.11.0"
 sha2 = "0.11.1"
 skrifa = "0.42.1"
 subsetter = "0.2.6"
