@@ -116,7 +116,9 @@ cd rust/scripts/parity
 ./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined, next-party, completed, delegation and copy emails via Mailpit, email_events rows
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
-./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
+./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, missing details, completed page, resubmit; stored rows
+./form_extras.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # invite, metadata, remembered signatures, prefill_attachments, start_form_self; stored rows
+./tools.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"     # /api/tools/merge (rendered pages) and /api/tools/verify (exact responses)
 ```
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
@@ -164,6 +166,19 @@ The rest of Phase 4 adds the links around the signing form:
 
 `downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
 
+Issue #7 ports the remaining signing-form endpoints and API gaps:
+
+- `POST /s/:slug/invite`, `GET /s/:slug/metadata` (text runs from PDFium, cached in `document_metadata`), `POST /s/:slug/prefill_attachments` and `PUT /start_form_self/:id`.
+- The remember-signature cookie (`signature_uuids`, written on upload with `remember_signature=true`) and `signed_signature_uuids` on the form page (`Submitters::FindRememberedSignature`).
+- `completed` recipients in `POST /api/submissions` and `PUT /api/submitters/:id`, with default, formula and date values, invite-by-field, the `api_complete_form` event and the completion jobs.
+- Prefilled attachment fields: base64 data or `https` URLs (with `DownloadUtils`' checks) of PNG and JPEG images and PDF files; blobs are reused by checksum.
+- Share link starts without the requested details render the form with Rails' `field_error_proc` markup, and resubmitting copies the attachments the `default_values` refer to.
+- Email message bodies of 2 KB or more have their styles and base64 data stored as `email_message_assets`.
+- `POST /api/tools/merge` and `POST /api/tools/verify` (`loco_pdf::signatures` and `loco_pdf::cms`, a PKCS#7 reader that checks RSA signatures as `OpenSSL::PKCS7#verify` does).
+- HTML errors without an error page (the 400 of a missing parameter) answer Rails' plain-text failsafe 500.
+
+`create.py` covers the API changes, `start_form.py` the share link changes, and `form_extras.py` and `tools.py` the rest.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -178,13 +193,12 @@ These parts return 422 ("not supported yet") or are still missing:
 - Email two-factor verification: sending and checking codes on the signing form and the share link (`shared_link_2fa`, reopening a pending party without the start form cookie, `?email_verification`) answers 422. A valid `email_2fa_slug` cookie or two-factor token is accepted.
 - Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission) answer 422.
 - The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
-- Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).
 - Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
-- The remember-signature cookie, and presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
-- Creating `completed` submitters and completing them through `PUT /api/submitters/:id`, and prefilling attachment fields.
+- Presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
+- Prefilling attachment fields with typed text (Rails renders it in a font) or with file types other than PNG, JPEG and PDF.
+- `/api/tools/merge` with documents that have form fields; `/api/tools/verify` with RFC 3161 timestamp signatures, signatures without RSA keys, revisions after the last signature that end with `%%EOF` (`FPDF_HasOnlyDSSChanges`), and trusted certificates other than the generated ones (custom certificates, `CERTS`, `TRUSTED_CERTS`).
 - Expiration jobs (Phase 7).
-- Extracting email assets from message bodies of 2 KB or more.
 
 ## Layout
 

@@ -1993,3 +1993,31 @@ struct Request<'a> {
     headers: &'a HeaderMap,
     uri: &'a Uri,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_assets_from_large_bodies() {
+        let style = format!(
+            "<style>{}</style> <STYLE>b {{}}</STYLE>",
+            "p { a: b }".repeat(40)
+        );
+        let data = "QUJD".repeat(100);
+        let body = format!(
+            "{style}<img src=\"data:image/png;base64,{data}\"><img src=\"data:image/png;base64,QUJD\">{}",
+            "x".repeat(2000)
+        );
+        let (out, assets) = extract_assets(&body);
+        assert_eq!(assets.len(), 2);
+        assert!(out.starts_with(&format!("[[asset:{}]]", assets[0].0)));
+        assert!(out.contains(&format!("data:image/png;base64,[[asset:{}]]", assets[1].0)));
+        assert!(out.contains("data:image/png;base64,QUJD\""));
+        assert_eq!(assets[1].1, data);
+
+        let (small, none) = extract_assets(&style);
+        assert_eq!(small, style);
+        assert_eq!(none, Vec::<(String, String)>::new());
+    }
+}

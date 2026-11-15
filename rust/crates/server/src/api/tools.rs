@@ -351,3 +351,29 @@ pub async fn verify(
         "signatures": results,
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encodes_like_base64_encode64() {
+        assert_eq!(encode64(b""), "");
+        assert_eq!(encode64(b"abc"), "YWJj\n");
+        let line = encode64(&[0_u8; 60]);
+        assert_eq!(line.lines().map(str::len).collect::<Vec<_>>(), vec![60, 20]);
+        assert!(line.ends_with('\n'));
+    }
+
+    #[test]
+    fn parses_pdf_dates_like_strptime() {
+        assert_eq!(
+            parse_time("D:20261115100000+01'00'").ok(),
+            Some(json!("2026-11-15T10:00:00.000+01:00"))
+        );
+        assert_eq!(
+            parse_time("D:20261115100000Z").ok(),
+            Some(json!("2026-11-15T10:00:00.000+00:00"))
+        );
+    }
+}
