@@ -216,6 +216,8 @@ jobs:
           tool: cargo-nextest,cargo-deny
       - name: Fetch pdfium
         run: scripts/fetch-pdfium.sh
+      - name: Fetch fonts
+        run: scripts/fetch-fonts.sh
       - name: Load baseline schema and Rust-owned tables
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f schema/baseline.sql
