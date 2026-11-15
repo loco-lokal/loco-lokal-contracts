@@ -2,7 +2,7 @@
 //! completion job (`ProcessSubmitterCompletionJob`).
 
 use chrono::NaiveDateTime;
-use sqlx::PgExecutor;
+use sqlx::{PgExecutor, PgPool};
 
 use crate::{DbError, JsonText, submissions::Submitter};
 
@@ -243,32 +243,41 @@ pub struct NewCompletedSubmitter<'a> {
 }
 
 /// Inserts the row unless the submitter has one; `is_first` marks the submission's first.
+/// Two parties completing at once both see no first row; the second insert then violates
+/// the partial unique index on `submission_id` and is retried, as Rails rescues
+/// `RecordNotUnique` and retries.
 pub async fn create_completed_submitter(
-    db: impl PgExecutor<'_>,
+    db: &PgPool,
     new: &NewCompletedSubmitter<'_>,
 ) -> Result<(), DbError> {
-    sqlx::query!(
-        r#"INSERT INTO completed_submitters
-             (submitter_id, submission_id, account_id, template_id, source, sms_count,
-              verification_method, completed_at, is_first, created_at, updated_at)
-           SELECT $1, $2, $3, $4, $5, $6, $7, $8,
-                  NOT EXISTS (SELECT 1 FROM completed_submitters
-                              WHERE submission_id = $2 AND is_first = true),
-                  (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc')
-           WHERE NOT EXISTS (SELECT 1 FROM completed_submitters WHERE submitter_id = $1)
-           ON CONFLICT DO NOTHING"#,
-        new.submitter_id,
-        new.submission_id,
-        new.account_id,
-        new.template_id,
-        new.source,
-        new.sms_count,
-        new.verification_method,
-        new.completed_at,
-    )
-    .execute(db)
-    .await?;
-    Ok(())
+    loop {
+        let inserted = sqlx::query!(
+            r#"INSERT INTO completed_submitters
+                 (submitter_id, submission_id, account_id, template_id, source, sms_count,
+                  verification_method, completed_at, is_first, created_at, updated_at)
+               SELECT $1, $2, $3, $4, $5, $6, $7, $8,
+                      NOT EXISTS (SELECT 1 FROM completed_submitters
+                                  WHERE submission_id = $2 AND is_first = true),
+                      (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc')
+               WHERE NOT EXISTS (SELECT 1 FROM completed_submitters WHERE submitter_id = $1)
+               ON CONFLICT (submitter_id) DO NOTHING"#,
+            new.submitter_id,
+            new.submission_id,
+            new.account_id,
+            new.template_id,
+            new.source,
+            new.sms_count,
+            new.verification_method,
+            new.completed_at,
+        )
+        .execute(db)
+        .await;
+        match inserted {
+            Err(sqlx::Error::Database(e))
+                if e.constraint() == Some("index_completed_submitters_on_submission_id") => {}
+            other => return other.map(|_| ()).map_err(Into::into),
+        }
+    }
 }
 
 /// `CompletedDocument.find_or_create_by!(sha256:, submitter_id:)`.
