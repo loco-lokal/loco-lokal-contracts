@@ -23,6 +23,7 @@ pub mod search;
 pub mod session;
 pub mod signing;
 pub mod state;
+pub mod templates;
 pub mod validation;
 pub mod webhooks;
 
@@ -65,6 +66,8 @@ pub fn router(state: AppState) -> Router {
     let pages = Router::new()
         .merge(routes::router())
         .route("/up", get(up))
+        // Rails answers an unrouted method with a 404, never a 405.
+        .method_not_allowed_fallback(not_found)
         .fallback(not_found)
         .with_state(state.clone());
 

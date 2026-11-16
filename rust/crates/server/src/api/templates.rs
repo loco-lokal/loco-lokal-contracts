@@ -130,7 +130,7 @@ pub(super) async fn authorized_template(
     }
 }
 
-pub(super) async fn can(
+pub(crate) async fn can(
     state: &AppState,
     auth: &Auth,
     template: &Template,
