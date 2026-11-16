@@ -1786,11 +1786,14 @@ dependencies = [
  "lopdf",
  "pdfium-render",
  "rcgen",
+ "regex",
  "rsa",
+ "serde_json",
  "sha2 0.11.1",
  "skrifa",
  "subsetter",
  "thiserror",
+ "uuid",
  "x509-parser",
 ]
 
