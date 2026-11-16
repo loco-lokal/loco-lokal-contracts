@@ -126,8 +126,10 @@ fn static_file(public_dir: &Path, request: &Request) -> bool {
         && public_dir.join(path).is_file()
 }
 
-async fn not_found() -> errors::AppError {
-    errors::AppError::Status(StatusCode::NOT_FOUND)
+async fn not_found() -> Response {
+    let mut response = errors::AppError::Status(StatusCode::NOT_FOUND).into_response();
+    response.extensions_mut().insert(errors::Unrouted);
+    response
 }
 
 /// Health check, equivalent to `rails/health#show`, plus a database round trip.

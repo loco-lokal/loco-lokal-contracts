@@ -52,7 +52,11 @@ pub fn unsupported(files: &[&UploadedFile]) -> Option<String> {
             return Some("Uploading ZIP archives is not supported yet".into());
         }
         if !is_pdf_or_image(&file.content_type)
-            && WORD_EXTENSIONS.contains(&extname(&rack_filename(&file.filename)).to_lowercase().as_str())
+            && WORD_EXTENSIONS.contains(
+                &extname(&rack_filename(&file.filename))
+                    .to_lowercase()
+                    .as_str(),
+            )
         {
             return Some("Uploading Word documents is not supported yet".into());
         }
@@ -161,7 +165,8 @@ pub async fn create_attachments(
             )
             .into());
         }
-        documents.push(handle_pdf_or_image(state, template_id, file, password, extract_fields).await?);
+        documents
+            .push(handle_pdf_or_image(state, template_id, file, password, extract_fields).await?);
     }
     Ok(documents)
 }
@@ -203,17 +208,19 @@ async fn handle_pdf_or_image(
         };
         if content_type == PDF_CONTENT_TYPE {
             // `generate_pdf_preview_images` without a PDFium document.
-            return Err(anyhow::anyhow!("NoMethodError: undefined method 'page_count' for nil").into());
+            return Err(
+                anyhow::anyhow!("NoMethodError: undefined method 'page_count' for nil").into(),
+            );
         }
         if content_type.starts_with("image/") {
             let data = file.data.clone();
-            let preview = tokio::task::spawn_blocking(move || {
-                previews::image_png(&data, &content_type)
-            })
-            .await
-            .map_err(anyhow::Error::from)?
-            .map_err(anyhow::Error::from)?;
-            document.previews = upload_previews(state, document.attachment.id, vec![preview]).await?;
+            let preview =
+                tokio::task::spawn_blocking(move || previews::image_png(&data, &content_type))
+                    .await
+                    .map_err(anyhow::Error::from)?
+                    .map_err(anyhow::Error::from)?;
+            document.previews =
+                upload_previews(state, document.attachment.id, vec![preview]).await?;
         }
         return Ok(document);
     }
@@ -241,7 +248,10 @@ async fn handle_pdf_or_image(
     metadata.insert("identified".into(), true.into());
     metadata.insert("analyzed".into(), true.into());
     if !processed.annotations.is_empty() {
-        metadata.insert("pdf".into(), json!({ "annotations": processed.annotations }));
+        metadata.insert(
+            "pdf".into(),
+            json!({ "annotations": processed.annotations }),
+        );
     }
     metadata.insert("sha256".into(), sha256(&data).into());
     if content_type == PDF_CONTENT_TYPE {
@@ -298,7 +308,13 @@ async fn create_document(
 ) -> anyhow::Result<(Attachment, Blob)> {
     let blob = state
         .storage
-        .create_and_upload_exact(&state.db, data, filename, Some(content_type), metadata.clone())
+        .create_and_upload_exact(
+            &state.db,
+            data,
+            filename,
+            Some(content_type),
+            metadata.clone(),
+        )
         .await?;
     let attachment = Attachment::create_for_blob(
         &state.db,
@@ -361,7 +377,11 @@ async fn upload_previews(
 pub fn normalize_attachment_fields(documents: &mut [Document], submitter_uuid: &str) -> Vec<Value> {
     let mut fields = Vec::new();
     for document in documents {
-        let Some(pdf) = document.metadata.get_mut("pdf").and_then(Value::as_object_mut) else {
+        let Some(pdf) = document
+            .metadata
+            .get_mut("pdf")
+            .and_then(Value::as_object_mut)
+        else {
             continue;
         };
         let Some(Value::Array(extracted)) = pdf.shift_remove("fields") else {
@@ -391,10 +411,22 @@ mod tests {
 
     #[test]
     fn identifies_content_like_marcel() {
-        assert_eq!(identify(b"%PDF-1.7", "a.png", "image/png"), "application/pdf");
-        assert_eq!(identify(b"\x89PNG\r\n\x1a\nxx", "a.jpg", "image/jpeg"), "image/png");
-        assert_eq!(identify(b"<svg/>", "a.svg", "image/svg+xml"), "image/svg+xml");
-        assert_eq!(identify(b"??", "a.gif", "application/octet-stream"), "image/gif");
+        assert_eq!(
+            identify(b"%PDF-1.7", "a.png", "image/png"),
+            "application/pdf"
+        );
+        assert_eq!(
+            identify(b"\x89PNG\r\n\x1a\nxx", "a.jpg", "image/jpeg"),
+            "image/png"
+        );
+        assert_eq!(
+            identify(b"<svg/>", "a.svg", "image/svg+xml"),
+            "image/svg+xml"
+        );
+        assert_eq!(
+            identify(b"??", "a.gif", "application/octet-stream"),
+            "image/gif"
+        );
     }
 
     #[test]
@@ -411,7 +443,11 @@ mod tests {
         let zip = file("all.zip", "application/zip");
         let pdf = file("a.pdf", "application/pdf");
         assert!(unsupported(&[&pdf]).is_none());
-        assert!(unsupported(&[&pdf, &docx]).unwrap().contains("Word documents"));
+        assert!(
+            unsupported(&[&pdf, &docx])
+                .unwrap()
+                .contains("Word documents")
+        );
         assert!(unsupported(&[&zip]).unwrap().contains("ZIP archives"));
     }
 }

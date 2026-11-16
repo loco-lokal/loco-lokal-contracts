@@ -100,6 +100,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/templates_upload", post(crate::templates::uploads::create))
         .route(
+            "/templates_upload/new",
+            get(crate::templates::uploads::new_from_url),
+        )
+        .route(
             "/templates/{template_id}/documents",
             post(crate::templates::uploads::create_documents),
         )

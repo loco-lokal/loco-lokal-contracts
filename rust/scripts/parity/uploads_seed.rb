@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-# Builds the PDFs that uploads.py uploads to both servers (run through `bin/rails runner`).
-# Prints one JSON object: file name => base64 PDF.
+# Prepares uploads.py (run through `bin/rails runner`): a user who signs in with a known
+# password, in the first user's account, and the files to upload. Prints one JSON object:
+# `{ "email":, "password":, "files": { name => base64 } }`.
 
 require 'hexapdf'
 
@@ -111,11 +112,48 @@ def encrypted_pdf
   save(doc)
 end
 
+def canvas(width, height, color)
+  Vips::Image.black(width, height, bands: color.size).new_from_image(color)
+end
+
+def color_png
+  canvas(800, 600, [255, 255, 255]).draw_rect([220, 30, 30], 100, 100, 200, 200, fill: true)
+                                   .draw_rect([30, 30, 30], 400, 300, 300, 20, fill: true)
+                                   .write_to_buffer('.png')
+end
+
+def gray_png
+  canvas(2000, 1333, [255]).draw_rect([40], 100, 100, 800, 800, fill: true).write_to_buffer('.png')
+end
+
+def rotated_jpg
+  image = canvas(1600, 1000, [255, 255, 255]).draw_rect([30, 60, 200], 100, 100, 600, 300, fill: true)
+  image = image.mutate { |m| m.set_type!(GObject::GINT_TYPE, 'orientation', 6) }
+  image.write_to_buffer('.jpg', Q: 90)
+end
+
+def wide_png
+  canvas(1000, 333, [255, 255, 255]).draw_rect([20, 160, 40], 50, 50, 400, 200, fill: true)
+                                    .write_to_buffer('.png')
+end
+
+account = User.order(:id).first.account
+user = account.users.find_or_initialize_by(email: 'parity-uploads@example.com')
+user.assign_attributes(first_name: 'Parity', last_name: 'Uploads', role: 'admin',
+                       password: 'parity-uploads-password', archived_at: nil)
+user.save!
+
 puts JSON.generate(
-  {
+  email: user.email,
+  password: 'parity-uploads-password',
+  files: {
     'form.pdf' => form_pdf,
     'links.pdf' => links_pdf,
     'pages.pdf' => pages_pdf(18),
-    'encrypted.pdf' => encrypted_pdf
+    'encrypted.pdf' => encrypted_pdf,
+    'color.png' => color_png,
+    'gray.png' => gray_png,
+    'rotated.jpg' => rotated_jpg,
+    'wide.png' => wide_png
   }.transform_values { |data| Base64.strict_encode64(data) }
 )

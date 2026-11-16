@@ -86,9 +86,8 @@ pub fn image_png(data: &[u8], content_type: &str) -> Result<Preview, PreviewErro
         clippy::cast_sign_loss,
         reason = "a positive pixel count"
     )]
-    let target_height = ((f64::from(height) * f64::from(target_width) / f64::from(width))
-        .round() as u32)
-        .max(1);
+    let target_height =
+        ((f64::from(height) * f64::from(target_width) / f64::from(width)).round() as u32).max(1);
     if (width, height) != (target_width, target_height) {
         let filter = if target_width < width {
             FilterType::Lanczos3
@@ -152,8 +151,22 @@ fn bitdepth(sums: &[u64]) -> u8 {
     1 << unique.len().clamp(1, 3)
 }
 
-/// The `pHYs` value libvips writes: the loader's resolution (pixels per mm) × 1000.
+/// The `pHYs` value libvips writes: the loader's resolution (pixels per mm) × 1000. An
+/// EXIF resolution overrides the file's own (`vips__exif_parse`).
 fn pixels_per_meter(data: &[u8], format: ImageFormat) -> u32 {
+    let exif = match format {
+        ImageFormat::Png => png_chunk(data, *b"eXIf"),
+        ImageFormat::Jpeg => jpeg_exif(data),
+        _ => None,
+    };
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "`rint(xres * 1000)` of a positive resolution"
+    )]
+    if let Some(per_mm) = exif.and_then(exif_resolution) {
+        return (per_mm * 1000.0).round() as u32;
+    }
     match format {
         ImageFormat::Png => png_phys(data).unwrap_or(2834),
         ImageFormat::Jpeg => jfif_density(data).unwrap_or(2835),
@@ -161,17 +174,100 @@ fn pixels_per_meter(data: &[u8], format: ImageFormat) -> u32 {
     }
 }
 
+fn png_chunk(data: &[u8], name: [u8; 4]) -> Option<&[u8]> {
+    let mut pos = 8;
+    while pos + 8 <= data.len() {
+        let length =
+            usize::try_from(u32::from_be_bytes(data[pos..pos + 4].try_into().ok()?)).ok()?;
+        if data[pos + 4..pos + 8] == name {
+            return data.get(pos + 8..pos + 8 + length);
+        }
+        pos += 12 + length;
+    }
+    None
+}
+
+/// The TIFF data of a JPEG's `Exif` APP1 segment.
+fn jpeg_exif(data: &[u8]) -> Option<&[u8]> {
+    let mut pos = 2;
+    while pos + 4 <= data.len() && data[pos] == 0xFF {
+        let marker = data[pos + 1];
+        if marker == 0xDA || marker == 0xD9 {
+            return None;
+        }
+        let length = usize::from(u16::from_be_bytes([data[pos + 2], data[pos + 3]]));
+        let body = data.get(pos + 4..pos + 2 + length)?;
+        if marker == 0xE1 && body.starts_with(b"Exif\0\0") {
+            return Some(&body[6..]);
+        }
+        pos += 2 + length;
+    }
+    None
+}
+
+/// `XResolution` of IFD0 in pixels per mm (`ResolutionUnit` inches unless 3, cm).
+fn exif_resolution(tiff: &[u8]) -> Option<f64> {
+    let little = match tiff.get(0..2)? {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let u16_at = |at: usize| -> Option<u16> {
+        let b: [u8; 2] = tiff.get(at..at + 2)?.try_into().ok()?;
+        Some(if little {
+            u16::from_le_bytes(b)
+        } else {
+            u16::from_be_bytes(b)
+        })
+    };
+    let u32_at = |at: usize| -> Option<u32> {
+        let b: [u8; 4] = tiff.get(at..at + 4)?.try_into().ok()?;
+        Some(if little {
+            u32::from_le_bytes(b)
+        } else {
+            u32::from_be_bytes(b)
+        })
+    };
+    let ifd = usize::try_from(u32_at(4)?).ok()?;
+    let (mut resolution, mut unit) = (None, 2);
+    for i in 0..usize::from(u16_at(ifd)?) {
+        let entry = ifd + 2 + i * 12;
+        match u16_at(entry)? {
+            0x011A => {
+                let at = usize::try_from(u32_at(entry + 8)?).ok()?;
+                let (num, den) = (u32_at(at)?, u32_at(at + 4)?);
+                if den != 0 {
+                    resolution = Some(f64::from(num) / f64::from(den));
+                }
+            }
+            0x0128 => unit = u16_at(entry + 8)?,
+            _ => {}
+        }
+    }
+    let resolution = resolution.filter(|r| *r > 0.0)?;
+    Some(if unit == 3 {
+        resolution / 10.0
+    } else {
+        resolution / 25.4
+    })
+}
+
 /// `pngload`: a `pHYs` in pixels per meter as is; one without a unit is read as pixels
 /// per mm. Without one, libvips assumes 72 dpi, truncated to 2834 per meter.
 fn png_phys(data: &[u8]) -> Option<u32> {
     let mut pos = 8;
     while pos + 8 <= data.len() {
-        let length = usize::try_from(u32::from_be_bytes(data[pos..pos + 4].try_into().ok()?)).ok()?;
+        let length =
+            usize::try_from(u32::from_be_bytes(data[pos..pos + 4].try_into().ok()?)).ok()?;
         let kind = &data[pos + 4..pos + 8];
         if kind == b"pHYs" && length >= 9 {
             let body = data.get(pos + 8..pos + 17)?;
             let x = u32::from_be_bytes(body[0..4].try_into().ok()?);
-            return Some(if body[8] == 1 { x } else { x.saturating_mul(1000) });
+            return Some(if body[8] == 1 {
+                x
+            } else {
+                x.saturating_mul(1000)
+            });
         }
         if kind == b"IDAT" || kind == b"IEND" {
             return None;
@@ -185,7 +281,10 @@ fn png_phys(data: &[u8]) -> Option<u32> {
 fn jfif_density(data: &[u8]) -> Option<u32> {
     let app0 = data.get(2..)?.windows(5).position(|w| w == b"JFIF\0")? + 2;
     let unit = *data.get(app0 + 7)?;
-    let x = f64::from(u16::from_be_bytes([*data.get(app0 + 8)?, *data.get(app0 + 9)?]));
+    let x = f64::from(u16::from_be_bytes([
+        *data.get(app0 + 8)?,
+        *data.get(app0 + 9)?,
+    ]));
     let per_mm = match unit {
         1 => x / 25.4,
         2 => x / 10.0,
@@ -203,19 +302,18 @@ fn jfif_density(data: &[u8]) -> Option<u32> {
 /// (1 pixel per mm), and the pixel dimensions.
 fn page_exif(width: u32, height: u32) -> Vec<u8> {
     const TEMPLATE: [u8; 180] = [
-        0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x06, 0x00, 0x12, 0x01, 0x03, 0x00,
-        0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a, 0x01, 0x05, 0x00, 0x01, 0x00,
-        0x00, 0x00, 0x56, 0x00, 0x00, 0x00, 0x1b, 0x01, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00,
-        0x5e, 0x00, 0x00, 0x00, 0x28, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
-        0x00, 0x00, 0x13, 0x02, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-        0x69, 0x87, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x38, 0x63, 0x00, 0x00, 0xe8, 0x03, 0x00, 0x00, 0x38, 0x63, 0x00, 0x00,
-        0xe8, 0x03, 0x00, 0x00, 0x06, 0x00, 0x00, 0x90, 0x07, 0x00, 0x04, 0x00, 0x00, 0x00,
-        0x30, 0x32, 0x31, 0x30, 0x01, 0x91, 0x07, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x02,
-        0x03, 0x00, 0x00, 0xa0, 0x07, 0x00, 0x04, 0x00, 0x00, 0x00, 0x30, 0x31, 0x30, 0x30,
-        0x01, 0xa0, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x02, 0xa0,
-        0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xa0, 0x04, 0x00,
-        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x06, 0x00, 0x12, 0x01, 0x03, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a, 0x01, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x56, 0x00, 0x00, 0x00, 0x1b, 0x01, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00, 0x5e, 0x00, 0x00,
+        0x00, 0x28, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x13, 0x02,
+        0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x69, 0x87, 0x04, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x63, 0x00, 0x00,
+        0xe8, 0x03, 0x00, 0x00, 0x38, 0x63, 0x00, 0x00, 0xe8, 0x03, 0x00, 0x00, 0x06, 0x00, 0x00,
+        0x90, 0x07, 0x00, 0x04, 0x00, 0x00, 0x00, 0x30, 0x32, 0x31, 0x30, 0x01, 0x91, 0x07, 0x00,
+        0x04, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x00, 0x00, 0xa0, 0x07, 0x00, 0x04, 0x00, 0x00,
+        0x00, 0x30, 0x31, 0x30, 0x30, 0x01, 0xa0, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0xff, 0xff,
+        0x00, 0x00, 0x02, 0xa0, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        0xa0, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ];
     let mut exif = TEMPLATE.to_vec();
     exif[160..164].copy_from_slice(&width.to_le_bytes());

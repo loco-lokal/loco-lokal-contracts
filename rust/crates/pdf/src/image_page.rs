@@ -52,13 +52,22 @@ pub fn build(
         }
         other => return Err(InvalidPng(format!("unsupported color type {other}"))),
     };
-    let image_box = image_box.unwrap_or([0.0, 0.0, page_width, page_height]);
+    // The default box starts at Integer zeros, printed without a fraction.
+    let image_box = match image_box {
+        Some(image_box) => image_box.map(|v| ruby_float(round4(v))),
+        None => [
+            "0".to_owned(),
+            "0".to_owned(),
+            ruby_float(round4(page_width)),
+            ruby_float(round4(page_height)),
+        ],
+    };
     Ok(build_pdf(
         &png,
         &color_space,
         colors,
         [round4(page_width), round4(page_height)],
-        image_box.map(round4),
+        &image_box,
     ))
 }
 
@@ -78,7 +87,12 @@ fn round4(value: f64) -> f64 {
 /// `Float#to_s`.
 fn ruby_float(value: f64) -> String {
     if value == 0.0 {
-        return if value.is_sign_negative() { "-0.0" } else { "0.0" }.to_owned();
+        return if value.is_sign_negative() {
+            "-0.0"
+        } else {
+            "0.0"
+        }
+        .to_owned();
     }
     let abs = value.abs();
     if (1e-4..1e16).contains(&abs) {
@@ -141,15 +155,10 @@ fn build_pdf(
     color_space: &str,
     colors: u8,
     [page_width, page_height]: [f64; 2],
-    [image_x, image_y, image_width, image_height]: [f64; 4],
+    [image_x, image_y, image_width, image_height]: &[String; 4],
 ) -> Vec<u8> {
-    let contents = format!(
-        "q\n{} 0 0 {} {} {} cm\n/Im0 Do\nQ",
-        ruby_float(image_width),
-        ruby_float(image_height),
-        ruby_float(image_x),
-        ruby_float(image_y)
-    );
+    let contents =
+        format!("q\n{image_width} 0 0 {image_height} {image_x} {image_y} cm\n/Im0 Do\nQ");
     let image_dict = format!(
         "<< /Type /XObject /Subtype /Image /Width {w} /Height {h} \
          /BitsPerComponent {bd} /ColorSpace {color_space} /Filter /FlateDecode \

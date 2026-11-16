@@ -55,6 +55,11 @@ impl IntoResponse for AppError {
 #[derive(Clone, Copy)]
 pub struct ErrorPage;
 
+/// Marks the 404 of a request no route matched: Rails' `ErrorsController` picks its
+/// format from the request alone, without the API's JSON default.
+#[derive(Clone, Copy)]
+pub struct Unrouted;
+
 /// Middleware that replaces marked error responses with the HTML or JSON error body.
 pub async fn error_page_layer(
     State(state): State<AppState>,
@@ -62,13 +67,47 @@ pub async fn error_page_layer(
     next: axum::middleware::Next,
 ) -> Response {
     let wants_json = wants_json(request.uri().path(), request.headers());
+    let unrouted_json = unrouted_wants_json(request.uri().path(), request.headers());
     let response = next.run(request).await;
 
     if response.extensions().get::<ErrorPage>().is_none() {
         return response;
     }
 
-    render_error(&state, response.status(), wants_json)
+    let json = if response.extensions().get::<Unrouted>().is_some() {
+        unrouted_json
+    } else {
+        wants_json
+    };
+    render_error(&state, response.status(), json)
+}
+
+/// `request.format` for `respond_to { json; any }`: a `.json` path, else the `Accept`
+/// header unless it is missing or browser-like (`text/html, */*`), where `*/*` picks
+/// the first format, JSON.
+fn unrouted_wants_json(path: &str, headers: &HeaderMap) -> bool {
+    if std::path::Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+    {
+        return true;
+    }
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let browser_like = accept.split(',').count() > 1 && accept.contains("*/*");
+    if accept.trim().is_empty() || browser_like {
+        return false;
+    }
+    accept.split(',').map(str::trim).find_map(|media| {
+        let media = media.split(';').next().unwrap_or_default().trim();
+        match media {
+            "application/json" | "*/*" => Some(true),
+            "text/html" | "application/xhtml+xml" | "text/*" => Some(false),
+            _ => None,
+        }
+    }) == Some(true)
 }
 
 fn wants_json(path: &str, headers: &HeaderMap) -> bool {

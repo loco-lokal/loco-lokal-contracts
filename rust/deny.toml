@@ -30,6 +30,12 @@ allow = [
   "Unicode-3.0",
   "Zlib",
 ]
+# libimagequant, which libvips uses for Rails' palette PNG previews; the same version
+# quantizes the Rust previews. GPL-3.0 code may be combined with AGPL-3.0 code (GPLv3
+# section 13).
+exceptions = [
+  { name = "imagequant", allow = ["GPL-3.0-or-later"] },
+]
 
 [bans]
 multiple-versions = "warn"

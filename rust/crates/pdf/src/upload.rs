@@ -15,9 +15,8 @@
 use std::collections::HashMap;
 
 use pdfium_render::prelude::{
-    FPDF_ANNOTATION, FPDF_DOCUMENT, FPDF_FILEWRITE, FPDF_FORMFILLINFO, FPDF_FORMHANDLE,
-    FPDF_PAGE, FPDF_WCHAR, FS_RECTF, Pdfium, PdfiumLibraryBindings,
-    PdfiumLibraryBindingsAccessor,
+    FPDF_ANNOTATION, FPDF_DOCUMENT, FPDF_FILEWRITE, FPDF_FORMFILLINFO, FPDF_FORMHANDLE, FPDF_PAGE,
+    FPDF_WCHAR, FS_RECTF, Pdfium, PdfiumLibraryBindings, PdfiumLibraryBindingsAccessor,
 };
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -353,7 +352,10 @@ impl<'a> Document<'a> {
         let Some(page) = self.page(page_index) else {
             return Vec::new();
         };
-        if let Some(annotations) = self.pages.get(&page_index).and_then(|p| p.annotations.clone())
+        if let Some(annotations) = self
+            .pages
+            .get(&page_index)
+            .and_then(|p| p.annotations.clone())
         {
             return annotations;
         }
@@ -535,13 +537,10 @@ impl<'a> Document<'a> {
             #[allow(clippy::cast_possible_truncation, reason = "page boxes are f32")]
             let [left, bottom, right, top] = geometry.box_.map(|v| v as f32);
             let (mut l, mut b, mut r, mut t) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
-            if self.bindings.FPDFPage_GetMediaBox(
-                page,
-                &raw mut l,
-                &raw mut b,
-                &raw mut r,
-                &raw mut t,
-            ) == 0
+            if self
+                .bindings
+                .FPDFPage_GetMediaBox(page, &raw mut l, &raw mut b, &raw mut r, &raw mut t)
+                == 0
             {
                 self.bindings
                     .FPDFPage_SetMediaBox(page, left, bottom, right, top);
@@ -688,9 +687,8 @@ impl Handle<'_> {
     fn action_javascript(&self, event: i32) -> Option<String> {
         // SAFETY: as above.
         read_wide(|buf, len| unsafe {
-            self.bindings.FPDFAnnot_GetFormAdditionalActionJavaScript(
-                self.form, self.annot, event, buf, len,
-            )
+            self.bindings
+                .FPDFAnnot_GetFormAdditionalActionJavaScript(self.form, self.annot, event, buf, len)
         })
     }
 
@@ -725,13 +723,12 @@ impl Handle<'_> {
                 return None;
             }
             let action = self.bindings.FPDFLink_GetAction(link);
-            if action.is_null() || self.bindings.FPDFAction_GetType(action) != PDFACTION_URI
-            {
+            if action.is_null() || self.bindings.FPDFAction_GetType(action) != PDFACTION_URI {
                 return None;
             }
-            let length = self
-                .bindings
-                .FPDFAction_GetURIPath(self.doc, action, std::ptr::null_mut(), 0);
+            let length =
+                self.bindings
+                    .FPDFAction_GetURIPath(self.doc, action, std::ptr::null_mut(), 0);
             if length <= 1 {
                 return None;
             }
@@ -762,7 +759,9 @@ impl Handle<'_> {
 }
 
 /// `Pdfium.read_wide_string`: UTF-16LE without the terminator; invalid units dropped.
-fn read_wide(mut call: impl FnMut(*mut FPDF_WCHAR, std::ffi::c_ulong) -> std::ffi::c_ulong) -> Option<String> {
+fn read_wide(
+    mut call: impl FnMut(*mut FPDF_WCHAR, std::ffi::c_ulong) -> std::ffi::c_ulong,
+) -> Option<String> {
     let length = call(std::ptr::null_mut(), 0);
     if length <= 2 {
         return None;
@@ -793,7 +792,14 @@ pub fn transform_rect(bounds: &[f64], box_: [f64; 4], rotation: i32) -> [f64; 6]
     let bottom = y0 - by0;
     let top = y1 - by0;
     match rotation {
-        1 => [bottom, left, top - bottom, right - left, box_height, box_width],
+        1 => [
+            bottom,
+            left,
+            top - bottom,
+            right - left,
+            box_height,
+            box_width,
+        ],
         2 => [
             box_width - right,
             bottom,
@@ -810,7 +816,14 @@ pub fn transform_rect(bounds: &[f64], box_: [f64; 4], rotation: i32) -> [f64; 6]
             box_height,
             box_width,
         ],
-        _ => [left, box_height - top, right - left, top - bottom, box_width, box_height],
+        _ => [
+            left,
+            box_height - top,
+            right - left,
+            top - bottom,
+            box_width,
+            box_height,
+        ],
     }
 }
 
@@ -874,8 +887,10 @@ fn select_placeholder() -> &'static Regex {
 fn date_format() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)[myd]{2,4}[-\\/ \t\r\n\x0B\x0C.][myd]{2,4}[-\\/ \t\r\n\x0B\x0C.][myd]{2,4}")
-            .expect("valid regex")
+        Regex::new(
+            r"(?i)[myd]{2,4}[-\\/ \t\r\n\x0B\x0C.][myd]{2,4}[-\\/ \t\r\n\x0B\x0C.][myd]{2,4}",
+        )
+        .expect("valid regex")
     })
 }
 
@@ -1168,7 +1183,10 @@ fn build_field(
                 )),
             );
         }
-        let options = properties["options"].as_array().cloned().unwrap_or_default();
+        let options = properties["options"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         for (area, option) in areas.iter_mut().zip(&options) {
             area.insert("option_uuid".into(), option["uuid"].clone());
         }
@@ -1216,7 +1234,11 @@ fn build_area(
     area.insert("w".into(), json!(w));
     area.insert("h".into(), json!(h));
     area.insert("attachment_uuid".into(), attachment_uuid.into());
-    if let Some(max_len) = widget.field.max_len.filter(|m| widget.field.comb() && *m > 0.0) {
+    if let Some(max_len) = widget
+        .field
+        .max_len
+        .filter(|m| widget.field.comb() && *m > 0.0)
+    {
         area.insert("cell_w".into(), json!(w / max_len));
     }
     Some(area)
@@ -1255,10 +1277,16 @@ fn build_field_properties(widgets: &[Widget]) -> Map<String, Value> {
         _ => Map::new(),
     };
     // `.compact`
-    properties.into_iter().filter(|(_, v)| !v.is_null()).collect()
+    properties
+        .into_iter()
+        .filter(|(_, v)| !v.is_null())
+        .collect()
 }
 
-fn build_button_properties(mut attrs: Map<String, Value>, widgets: &[Widget]) -> Map<String, Value> {
+fn build_button_properties(
+    mut attrs: Map<String, Value>,
+    widgets: &[Widget],
+) -> Map<String, Value> {
     let field = &widgets[0].field;
     let options = widgets
         .iter()
@@ -1287,7 +1315,10 @@ fn build_button_properties(mut attrs: Map<String, Value>, widgets: &[Widget]) ->
                 .ok()
                 .and_then(|i| options.get(i).cloned())
         });
-        attrs.insert("default_value".into(), default.map_or(Value::Null, Value::from));
+        attrs.insert(
+            "default_value".into(),
+            default.map_or(Value::Null, Value::from),
+        );
     } else if field.control_count > 1 && export_values.len() > 1 {
         let values: Vec<OptionValue> = export_values
             .iter()
@@ -1300,7 +1331,10 @@ fn build_button_properties(mut attrs: Map<String, Value>, widgets: &[Widget]) ->
             Value::Array(build_options(&values, Some("radio"))),
         );
         let default = checked.and_then(|c| presence(c.field.export_value.clone()));
-        attrs.insert("default_value".into(), default.map_or(Value::Null, Value::from));
+        attrs.insert(
+            "default_value".into(),
+            default.map_or(Value::Null, Value::from),
+        );
     } else {
         attrs.insert("type".into(), "checkbox".into());
         attrs.insert("default_value".into(), checked.is_some().into());
@@ -1318,14 +1352,22 @@ fn build_select_properties(mut attrs: Map<String, Value>, widget: &Widget) -> Ma
     } else {
         None
     };
-    let values: Vec<OptionValue> = field.options.iter().cloned().map(OptionValue::Text).collect();
+    let values: Vec<OptionValue> = field
+        .options
+        .iter()
+        .cloned()
+        .map(OptionValue::Text)
+        .collect();
     attrs.insert("type".into(), "select".into());
     attrs.insert(
         "options".into(),
         Value::Array(build_options(&values, Some("select"))),
     );
     let default = value.filter(|v| !select_placeholder().is_match(v));
-    attrs.insert("default_value".into(), default.map_or(Value::Null, Value::from));
+    attrs.insert(
+        "default_value".into(),
+        default.map_or(Value::Null, Value::from),
+    );
     attrs
 }
 
@@ -1393,9 +1435,10 @@ fn build_options(values: &[OptionValue], kind: Option<&str>) -> Vec<Value> {
         .filter_map(|option| {
             let (text, is_number) = match option {
                 OptionValue::Text(s) => (s.as_str(), false),
-                OptionValue::Symbol(s) => {
-                    (s.as_str(), !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
-                }
+                OptionValue::Symbol(s) => (
+                    s.as_str(),
+                    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()),
+                ),
             };
             if kind == Some("select") && select_placeholder().is_match(text) {
                 return None;

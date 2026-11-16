@@ -118,18 +118,21 @@ pub async fn create(
     .await?;
 
     let password = params.str("password");
-    let mut documents =
-        match create_attachments(&state, template.id, &attachments, password.as_deref(), true)
-            .await
-        {
-            Ok(documents) => documents,
-            Err(CreateError::PdfEncrypted) => {
-                return Ok(prompt_password(
-                    &params.str("form_id").unwrap_or_default(),
-                ));
-            }
-            Err(CreateError::Failed(err)) => return Ok(failed(&state, &err)),
-        };
+    let mut documents = match create_attachments(
+        &state,
+        template.id,
+        &attachments,
+        password.as_deref(),
+        true,
+    )
+    .await
+    {
+        Ok(documents) => documents,
+        Err(CreateError::PdfEncrypted) => {
+            return Ok(prompt_password(&params.str("form_id").unwrap_or_default()));
+        }
+        Err(CreateError::Failed(err)) => return Ok(failed(&state, &err)),
+    };
 
     let mut schema: Vec<Value> = documents
         .iter()
@@ -140,7 +143,10 @@ pub async fn create(
             })
         })
         .collect();
-    let first_party_uuid = first_party[0]["uuid"].as_str().unwrap_or_default().to_owned();
+    let first_party_uuid = first_party[0]["uuid"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     let fields = normalize_attachment_fields(&mut documents, &first_party_uuid);
     if !fields.is_empty() {
         for item in &mut schema {
@@ -171,6 +177,11 @@ pub async fn create(
         &headers,
         &format!("/templates/{}/edit", template.id),
     ))
+}
+
+/// `GET /templates_upload/new?url=…`: the page that opens a document from a URL.
+pub async fn new_from_url(RequireAuth(_auth): RequireAuth) -> Response {
+    api::unprocessable("Uploading documents from a URL is not supported yet")
 }
 
 /// `turbo_stream.append(params[:form_id], html: tag.prompt_password)`.
