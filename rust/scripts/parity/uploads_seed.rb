@@ -12,17 +12,12 @@ def save(doc)
   io.string
 end
 
-def add_text(doc, page, text, y)
-  page.canvas.font('Helvetica', size: 12).text(text, at: [50, y])
+def add_text(doc, page, text, top)
+  page.canvas.font('Helvetica', size: 12).text(text, at: [50, top])
   doc
 end
 
-def form_pdf
-  doc = HexaPDF::Document.new
-  page = doc.pages.add
-  add_text(doc, page, 'Fillable form', 760)
-  form = doc.acro_form(create: true)
-
+def add_text_fields(form, page)
   name = form.create_text_field('Full Name')
   name.create_widget(page, Rect: [50, 700, 250, 720])
   name.flag(:required)
@@ -36,45 +31,57 @@ def form_pdf
   filled.create_widget(page, Rect: [50, 660, 250, 680])
   filled.field_value = 'Already there'
 
-  code = form.create_comb_text_field('Code', max_chars: 5)
-  code.create_widget(page, Rect: [300, 660, 400, 680])
+  form.create_comb_text_field('Code', max_chars: 5).create_widget(page, Rect: [300, 660, 400, 680])
 
   date = form.create_text_field('Start Date')
   date.create_widget(page, Rect: [50, 620, 250, 640])
   date[:AA] = { F: { S: :JavaScript, JS: 'AFDate_FormatEx("mm/dd/yyyy");' },
                 K: { S: :JavaScript, JS: 'AFDate_KeystrokeEx("mm/dd/yyyy");' } }
+end
 
-  agree = form.create_check_box('Agree')
-  agree.create_widget(page, Rect: [50, 580, 64, 594])
+def add_choice_fields(form, page)
+  form.create_check_box('Agree').create_widget(page, Rect: [50, 580, 64, 594])
 
   plan = form.create_radio_button('Plan')
   plan.create_widget(page, value: :Basic, Rect: [50, 540, 64, 554])
   plan.create_widget(page, value: :Pro, Rect: [100, 540, 114, 554])
 
-  country = form.create_combo_box('Country', option_items: ['Select a country', 'Germany', 'France'])
-  country.create_widget(page, Rect: [300, 580, 500, 600])
+  form.create_combo_box('Country', option_items: ['Select a country', 'Germany', 'France'])
+      .create_widget(page, Rect: [300, 580, 500, 600])
 
   size = form.create_combo_box('Size', option_items: %w[Small Large])
   size.create_widget(page, Rect: [300, 540, 500, 560])
   size.field_value = 'Large'
+end
 
-  signature = form.create_signature_field('Signature')
-  signature.create_widget(page, Rect: [50, 440, 250, 500])
-
-  initials = form.create_signature_field('Initials')
-  initials.create_widget(page, Rect: [300, 440, 400, 500])
+def add_signature_fields(form, page)
+  form.create_signature_field('Signature').create_widget(page, Rect: [50, 440, 250, 500])
+  form.create_signature_field('Initials').create_widget(page, Rect: [300, 440, 400, 500])
 
   push = form.send(:create_field, 'Reset', :Btn, &:initialize_as_push_button)
   push.create_widget(page, Rect: [450, 440, 500, 460])
+end
 
+def add_rotated_page(doc, form)
   rotated = doc.pages.add
   rotated.rotate(90)
   add_text(doc, rotated, 'Rotated page', 700)
-  notes = form.create_text_field('Notes 2')
-  notes.create_widget(rotated, Rect: [100, 300, 300, 330])
+  form.create_text_field('Notes 2').create_widget(rotated, Rect: [100, 300, 300, 330])
   rotated[:Annots] ||= []
   rotated[:Annots] << doc.add({ Type: :Annot, Subtype: :Link, Rect: [100, 500, 300, 520],
                                 A: { S: :URI, URI: 'https://example.com/rotated' } })
+end
+
+def form_pdf
+  doc = HexaPDF::Document.new
+  page = doc.pages.add
+  add_text(doc, page, 'Fillable form', 760)
+  form = doc.acro_form(create: true)
+
+  add_text_fields(form, page)
+  add_choice_fields(form, page)
+  add_signature_fields(form, page)
+  add_rotated_page(doc, form)
 
   form.create_appearances
   save(doc)
