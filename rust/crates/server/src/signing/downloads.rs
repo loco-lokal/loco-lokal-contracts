@@ -62,7 +62,10 @@ async fn select_for_download(
 }
 
 /// `Submitters.build_document_urls(submitter)`.
-async fn build_document_urls(state: &AppState, submitter: Submitter) -> Result<Value, AppError> {
+pub(super) async fn build_document_urls(
+    state: &AppState,
+    submitter: Submitter,
+) -> Result<Value, AppError> {
     let (_, attachments) = select_for_download(state, submitter.clone()).await?;
     let filename_format = super::emails::filename_format(state, submitter.account_id).await?;
     let mut vars = Vars::load(state, submitter)
@@ -155,6 +158,24 @@ pub async fn partial(
     Ok(crate::api::ok(&Value::Array(urls)))
 }
 
+/// `Submitter.find_signed(sig, purpose: :download_completed)`.
+pub(super) async fn signed_submitter(
+    state: &AppState,
+    sig: &str,
+) -> Result<Option<Submitter>, AppError> {
+    let purpose = loco_rails_compat::signed_id_purpose("submitter", Some("download_completed"));
+    let Some(id) = state
+        .secrets
+        .signed_id_verifier
+        .verify(sig, Some(&purpose))
+        .ok()
+        .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
+    else {
+        return Ok(None);
+    };
+    Ok(loco_db::submissions::find_submitter(&state.db, id).await?)
+}
+
 /// `GET /s/:slug/documents` and `GET /submitters/:slug/download`.
 pub async fn completed(
     State(state): State<AppState>,
@@ -173,19 +194,10 @@ async fn completed_for(
     headers: &HeaderMap,
     params: &Params,
 ) -> Result<Response, AppError> {
-    let mut signed = None;
-    if let Some(sig) = params.str("sig") {
-        let purpose = loco_rails_compat::signed_id_purpose("submitter", Some("download_completed"));
-        if let Some(id) = state
-            .secrets
-            .signed_id_verifier
-            .verify(&sig, Some(&purpose))
-            .ok()
-            .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
-        {
-            signed = loco_db::submissions::find_submitter(&state.db, id).await?;
-        }
-    }
+    let signed = match params.str("sig") {
+        Some(sig) => signed_submitter(state, &sig).await?,
+        None => None,
+    };
     let signature_valid = signed.as_ref().is_some_and(|s| s.slug == slug);
     let submitter = match signed.filter(|_| signature_valid) {
         Some(s) => s,

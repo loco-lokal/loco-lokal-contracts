@@ -34,6 +34,57 @@ impl SigningKey {
             key,
         })
     }
+
+    /// `OpenSSL::PKCS12.new(der, password)`: the first private key, the first certificate
+    /// whose public key matches it, and the other certificates in order as the chain
+    /// (`ca_certs`), as OpenSSL's `PKCS12_parse` picks them.
+    pub fn from_pkcs12(der: &[u8], password: &str) -> Result<Self, EditError> {
+        use rsa::{pkcs8::DecodePrivateKey as _, traits::PublicKeyParts as _};
+        const RSA_ENCRYPTION: &str = "1.2.840.113549.1.1.1";
+        let archive = p12_keystore::Pkcs12Archive::from_pkcs12(der, password)
+            .map_err(|e| EditError::Sign(format!("PKCS#12: {e}")))?;
+        let bag = archive.keys.first().ok_or(EditError::Unsupported(
+            "Signing with a certificate without a private key",
+        ))?;
+        if bag.key.oid().to_string() != RSA_ENCRYPTION {
+            return Err(EditError::Unsupported("Signing with a non-RSA key"));
+        }
+        let key = RsaPrivateKey::from_pkcs8_der(bag.key.as_der())
+            .map_err(|e| EditError::Sign(e.to_string()))?;
+        let (modulus, exponent) = (key.n().to_bytes_be(), key.e().to_bytes_be());
+        let matches = |der: &[u8]| {
+            let Ok((_, certificate)) = X509Certificate::from_der(der) else {
+                return false;
+            };
+            match certificate.public_key().parsed() {
+                Ok(x509_parser::public_key::PublicKey::RSA(rsa)) => {
+                    let trim = |b: &[u8]| -> Vec<u8> {
+                        b.iter().copied().skip_while(|v| *v == 0).collect()
+                    };
+                    trim(rsa.modulus) == modulus && trim(rsa.exponent) == exponent
+                }
+                _ => false,
+            }
+        };
+        let mut certificate = None;
+        let mut chain = Vec::new();
+        for bag in &archive.certs {
+            let der = bag.cert.as_der().to_vec();
+            if certificate.is_none() && matches(&der) {
+                certificate = Some(der);
+            } else {
+                chain.push(der);
+            }
+        }
+        let certificate = certificate.ok_or(EditError::Unsupported(
+            "Signing with a private key without its certificate",
+        ))?;
+        Ok(Self {
+            certificate,
+            chain,
+            key,
+        })
+    }
 }
 
 const OID_DATA: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x01];
@@ -43,6 +94,9 @@ const OID_MESSAGE_DIGEST: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x
 const OID_SIGNING_TIME: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x05];
 const OID_SIGNING_CERTIFICATE_V2: &[u8] = &[
     0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x2F,
+];
+const OID_TIME_STAMP_TOKEN: &[u8] = &[
+    0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x10, 0x02, 0x0E,
 ];
 const OID_SHA256: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
 const OID_RSA: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01];
@@ -91,11 +145,16 @@ fn implicit(tag: u8, mut der: Vec<u8>) -> Vec<u8> {
     der
 }
 
+/// The timestamp token for a signature value (`timestamp_handler.sign`), embedded in the
+/// signer info's unsigned attributes as `id-aa-timeStampToken`.
+pub type Timestamper<'a> = &'a mut dyn FnMut(&[u8]) -> Vec<u8>;
+
 /// `SignedDataCreator.create(data, type: :cms)`.
 pub fn signed_data(
     data: &[u8],
     key: &SigningKey,
     signing_time: &str,
+    timestamp: Option<Timestamper<'_>>,
 ) -> Result<Vec<u8>, EditError> {
     let (_, certificate) =
         X509Certificate::from_der(&key.certificate).map_err(|e| EditError::Sign(e.to_string()))?;
@@ -126,6 +185,11 @@ pub fn signed_data(
         )
         .map_err(|e| EditError::Sign(e.to_string()))?;
 
+    // `create_unsigned_attrs(signature)`.
+    let unsigned_attrs = timestamp.map(|timestamp| {
+        let token = timestamp(&signature);
+        implicit(1, set(&[&attribute(OID_TIME_STAMP_TOKEN, &token)]))
+    });
     let signer_info = seq(&[
         &tlv(0x02, &[1]),
         &seq(&[issuer, &serial]),
@@ -133,6 +197,7 @@ pub fn signed_data(
         &implicit(0, signed_attrs),
         &seq(&[&oid(OID_RSA), &null()]),
         &tlv(0x04, &signature),
+        unsigned_attrs.as_deref().unwrap_or_default(),
     ]);
     let mut certificates = key.certificate.clone();
     for ca in &key.chain {

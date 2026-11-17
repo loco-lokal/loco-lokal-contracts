@@ -3,9 +3,8 @@
 //! of a completed submission in one PDF, signed like the results and attached to the
 //! submission as `combined_document`. Also `Submitters.build_combined_url`.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use chrono::Utc;
 use loco_db::{signing, submissions::Submitter};
 use loco_pdf::edit::Editor;
 use loco_storage::{Attachment, Blob};
@@ -13,7 +12,8 @@ use serde_json::{Value, json};
 
 use super::{
     Form,
-    results::{SIGN_REASON, check_pdf_format, check_timestamp_server, load_signing_key, pdf_error},
+    results::{SIGN_REASON, Signer, load_signing_key, pdf_error, save_pdf},
+    timestamp::TimestampHandler,
 };
 use crate::{email_variables::Vars, errors::AppError, state::AppState};
 
@@ -146,7 +146,6 @@ pub(super) async fn select_attachments_for_download(
 /// `GenerateCombinedAttachment.call(submitter)`: the documents as `generate_pdfs` fills
 /// them for the submitter, in schema order, then the audit trail.
 async fn generate(state: &AppState, submitter: &Submitter) -> Result<(Attachment, Blob), AppError> {
-    check_pdf_format()?;
     let form = Form::for_submitter(state, submitter.clone()).await?;
     let mut pdfs = super::results::generate_pdfs(state, &form).await?;
     let audit_trail = Box::pin(super::audit::build_audit_trail(state, form.submission.id)).await?;
@@ -166,26 +165,21 @@ async fn generate(state: &AppState, submitter: &Submitter) -> Result<(Attachment
     let document = audit_trail.into_document().map_err(pdf_error)?;
     result.import_pages(&document).map_err(pdf_error)?;
 
-    let key = load_signing_key(state, form.account.id).await?;
-    if key.is_some() {
-        check_timestamp_server(state, form.account.id).await?;
-    }
-
-    let now = Utc::now();
-    result.set_info_text("Creator", "DocuSeal (https://www.docuseal.com)");
-    let date = now.format("D:%Y%m%d%H%M%S").to_string();
-    let bytes = match &key {
-        // `single_sign_reason`: `SIGN_REASON` has no `%{name}`.
-        Some(key) => result
-            .save_signed(
-                &date,
-                &now.format("%Y%m%d%H%M%S").to_string(),
-                SIGN_REASON,
-                key,
-            )
-            .map_err(pdf_error)?,
-        None => result.save(&date).map_err(pdf_error)?,
+    // `single_sign_reason` (`SIGN_REASON` has no `%{name}`) and
+    // `build_signing_params(submitter, pkcs, tsa_url)`.
+    let signer = match load_signing_key(state, form.account.id).await? {
+        Some(key) => Some(Signer {
+            reason: SIGN_REASON.to_owned(),
+            key: Arc::new(key),
+            timestamp: TimestampHandler::load(state, form.account.id)
+                .await?
+                .map(Arc::new),
+        }),
+        None => None,
     };
+    // The `Creator`, PDF/A-3b with `PDF_FORMAT=pdf/a-3b`, and the signature, as for the
+    // result documents.
+    let bytes = save_pdf(state, result, signer.as_ref()).await?;
 
     let name = form
         .submission
