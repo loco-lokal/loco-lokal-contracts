@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO document_metadata (account_id, blob_checksum, text_runs, created_at)\n           VALUES ($1, $2, $3, (now() AT TIME ZONE 'utc'))\n           ON CONFLICT (account_id, blob_checksum) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a962beef0942a5bb33d08eb7cde82d1c4b1b41f100d4d60c6075fbb21cf3f52e"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "INSERT INTO submitters (submission_id, account_id, uuid, email, phone, slug, values,\n                                   preferences, metadata, created_at, updated_at)\n           VALUES ($1, $2, $3, $4, $5, $6, '{}', '{}', '{}',\n                   (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
+  "query": "INSERT INTO submitters (submission_id, template_id, account_id, uuid, email, phone, slug,\n                                   values, preferences, metadata, created_at, updated_at)\n           VALUES ($1, (SELECT template_id FROM submissions WHERE id = $1), $2, $3, $4, $5, $6,\n                   '{}', '{}', '{}', (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
   "describe": {
     "columns": [
       {
@@ -281,5 +281,5 @@
       true
     ]
   },
-  "hash": "b4c5294d0e0170b5cbaa57746142bfe2597bce1bfbcfc61e0988366a4f25924a"
+  "hash": "88f5e6f2fe609e2e58982515d3363bd8ce2547a579103150eb27d2d8e499ac53"
 }

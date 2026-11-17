@@ -1,0 +1,283 @@
+{#- Port of app/views/submissions/show.html.erb with `is_preview: true`, as
+    `SubmissionsPreviewController#show` renders it (the `plain` layout). The view model is
+    built by `signing::preview::ShowView`. Hotwire Native tabs are not ported (422). -#}
+{% extends "layouts/plain.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div style="max-width: 1600px" class="mx-auto pl-4">
+    <div class="flex justify-between items-center pr-4 sticky top-0 md:relative z-10 bg-base-100 py-1.5">
+        <a href="{{ header.home_href }}" class="flex items-center space-x-3 py-1">
+          <span>{% with logo_width = 40, logo_height = 40 %}{% include "shared/_logo.html" %}{% endwith %}
+</span>
+          <h1 class="text-xl md:text-3xl font-semibold focus:text-clip" style="overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;">{% for item in header.title_parts %}{{ item }}<wbr>{% endfor %}</h1>
+        </a>
+      <div class="flex items-center gap-3">
+        {% if header.unarchive_top %}
+          <native-action data-label="{{ t('unarchive') }}" data-icon="rotate" data-section="archive">
+            <form class="button_to" method="post" action="/submissions/{{ header.submission_id }}/unarchive"><button class="btn btn-primary btn-ghost text-base hidden md:flex" type="submit">{{ buttons.button_title(title=t('unarchive'), disabled_with=t('unarchive')[:-1], icon=svg_icon('rotate', class='w-6 h-6')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /></form>
+          </native-action>
+        {% endif %}
+        {% if header.audit_log_url %}
+          <native-action data-label="{{ t('audit_log') }}" data-icon="external_link">
+            <a href="{{ header.audit_log_url }}" class="white-button" target="_blank">
+              {{ svg_icon('external_link', class='w-6 h-6') }}
+              <span class="hidden md:inline">{{ t('audit_log') }}</span>
+            </a>
+          </native-action>
+        {% elif header.event_log %}
+          <native-action data-label="{{ t('event_log') }}" data-icon="logs">
+            <open-modal-mobile class="flex">
+              <a class="white-button" data-turbo-frame="modal" href="/submissions/{{ header.submission_id }}/events">
+                {{ svg_icon('logs', class='w-6 h-6') }}
+                <span class="hidden md:block">{{ t('event_log') }}</span>
+</a>            </open-modal-mobile>
+          </native-action>
+        {% endif %}
+        {% if header.download %}
+            <div class="join relative">
+              <native-action data-label="{{ t('download') }}" data-icon="download">
+                <download-button role="button" tabindex="0" aria-label="{{ t('download') }}" data-src="{{ header.download.src }}" class="base-button {{ '!rounded-r-none !pr-2' if header.download.dropdown else '' }}">
+                  <span class="flex items-center justify-center space-x-2" data-target="download-button.defaultButton">
+                    {{ svg_icon('download', class='w-6 h-6') }}
+                    <span class="hidden md:inline">{{ t('download') }}</span>
+                  </span>
+                  <span class="flex items-center justify-center space-x-2 hidden" data-target="download-button.loadingButton">
+                    {{ svg_icon('loader', class='w-6 h-6 animate-spin') }}
+                    <span class="hidden md:inline">{{ t('downloading') }}</span>
+                  </span>
+                </download-button>
+              </native-action>
+              {% if header.download.dropdown %}
+                <div class="dropdown dropdown-end has-[button:disabled]:dropdown-open">
+                    <label tabindex="0" aria-label="{{ t('download') }}" class="base-button !rounded-l-none !pl-1 !pr-2 !border-l-neutral-500">
+                      <span class="text-sm align-text-top">
+                        {{ svg_icon('chevron_down', class='w-6 h-6 flex-shrink-0 stroke-2') }}
+                      </span>
+                    </label>
+                  <ul class="z-10 dropdown-content p-2 mt-2 shadow menu text-base bg-base-100 rounded-box text-right">
+                    {% if header.download.combined_src %}
+                      <native-action data-label="{{ t('download_combined_pdf') }}" data-icon="download">
+                        <li>
+                          <download-button role="button" tabindex="0" data-src="{{ header.download.combined_src }}" class="flex items-center">
+                            <span class="flex items-center justify-center space-x-2" data-target="download-button.defaultButton">
+                              {{ svg_icon('download', class='w-6 h-6 flex-shrink-0') }}
+                              <span class="whitespace-nowrap">{{ t('download_combined_pdf') }}</span>
+                            </span>
+                            <span class="flex items-center justify-center space-x-2 hidden" data-target="download-button.loadingButton">
+                              {{ svg_icon('loader', class='w-6 h-6 animate-spin') }}
+                              <span>{{ t('downloading') }}</span>
+                            </span>
+                          </download-button>
+                        </li>
+                      </native-action>
+                    {% endif %}
+                    {% if header.download.unarchive %}
+                      <native-action data-label="{{ t('unarchive') }}" data-icon="rotate" data-section="archive">
+                        <li>
+                          <button form="submission_unarchive_form">
+                            {{ buttons.button_title(title=t('unarchive'), disabled_with=t('unarchive'), icon=svg_icon('rotate', class='w-6 h-6 flex-shrink-0')) }}
+                          </button>
+                          <form class="hidden" id="submission_unarchive_form" method="post" action="/submissions/{{ header.submission_id }}/unarchive"><button type="submit"></button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /></form>
+                        </li>
+                      </native-action>
+                    {% endif %}
+                  </ul>
+                </div>
+              {% endif %}
+            </div>
+        {% elif header.share_link %}
+          <native-action data-label="{{ t('share_link') }}" data-icon="link">
+            {% with text = header.share_link, class = 'base-button', icon_class = 'w-6 h-6 text-white', copy_title = t('copy_share_link'), copied_title = t('copied_to_clipboard') %}{% include "shared/_clipboard_copy.html" %}{% endwith %}
+          </native-action>
+        {% endif %}
+      </div>
+    </div>
+  <div class="flex md:max-h-[calc(100vh-60px)]">
+        <div class="overflow-y-auto overflow-x-hidden hidden lg:block w-52 flex-none pr-3 mt-0.5 pt-0.5" tabindex="0">
+          {% for thumb in thumbnails %}
+              <scroll-to data-selector-id="page-{{ thumb.uuid }}-0" class="block cursor-pointer">
+                <img src="{{ thumb.src }}" width="{{ thumb.width }}" height="{{ thumb.height }}" class="rounded border" loading="lazy" alt="{{ thumb.name }}">
+                <div class="pb-2 pt-1.5 text-center" dir="auto">
+                  {{ thumb.name }}
+                </div>
+              </scroll-to>
+          {% endfor %}
+        </div>
+      <div id="document_view" class="w-full overflow-y-auto overflow-x-hidden mt-0.5 pt-0.5" tabindex="0">
+        <div class="pr-3.5 pl-0.5 max-md:pr-4 max-md:pl-0">
+          {% for document in documents %}
+            {% for page in document.pages %}
+              <page-container id="page-{{ document.uuid }}-{{ page.index }}" class="block before:border before:absolute before:top-0 before:bottom-0 before:left-0 before:right-0 before:rounded relative mb-4" style="container-type: size; aspect-ratio: {{ page.width }} / {{ page.height }}">
+                <img loading="lazy" src="{{ page.url }}" width="{{ page.width }}" class="rounded" height="{{ page.height }}" alt="{{ page.alt }}">
+                <div class="top-0 bottom-0 left-0 right-0 absolute">
+                  {% for annot in page.annots %}
+                    {% include "submissions/_annotation.html" %}
+                  {% endfor %}
+                  {% for f in page.fields %}
+                    {% if f.kind == 'masked' %}
+                        <span class="group">
+                          <span class="hidden group-hover:inline">
+                            {% with v = f.value %}{% include "submissions/_value.html" %}{% endwith %}
+                          </span>
+                          <span class="group-hover:hidden">
+                            {% with v = f.masked %}{% include "submissions/_value.html" %}{% endwith %}
+                          </span>
+                        </span>
+                    {% elif f.kind == 'value' %}
+                        {% with v = f.value %}{% include "submissions/_value.html" %}{% endwith %}
+                    {% else %}
+                      <div class="absolute overflow-visible" style="{{ f.style }}">
+                        <div class="flex h-full w-full bg-opacity-80 justify-center items-center {{ f.bg_class }}">
+                          {{ svg_icon(f.icon, class='max-h-10 w-full h-full stroke-2 opacity-50') }}
+                        </div>
+                      </div>
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              </page-container>
+            {% endfor %}
+          {% endfor %}
+        </div>
+      </div>
+      <div id="parties_view" class="hidden md:block md:w-80 relative w-full flex-none pt-0.5 pr-4 pl-0.5 max-md:pl-0 overflow-auto space" tabindex="0">
+        {% for party in parties %}
+          <div class="sticky -top-1 bg-base-100 pt-1 -mt-1">
+            <div class="group border border-base-300 rounded-md px-2 py-1 mb-1">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-1">
+                  <span class="mx-1 w-3 h-3 shrink-0 rounded-full {{ party.color }}"></span>
+                  <span class="text-lg" dir="auto">
+                    {{ party.role }}
+                  </span>
+                </div>
+                {% if party.edit %}
+                  <span class="tooltip tooltip-left tooltip-no-touch" data-tip="{{ t('edit') }}">
+                    <open-modal-mobile>
+                      <a class="shrink-0 inline md:hidden md:group-hover:inline" data-turbo-frame="modal" data-native-modal="medium" aria-label="{{ t('edit_recipient') }}" href="/submitters/{{ party.id }}/edit">
+                        {{ svg_icon('pencil', class='w-5 h-5') }}
+</a>                    </open-modal-mobile>
+                  </span>
+                {% endif %}
+              </div>
+              {% if party.name %}
+                <div class="flex items-center space-x-1 mt-1">
+                  {{ svg_icon('user', class='w-5 h-5 shrink-0') }}
+                  <span class="truncate">
+                    {{ party.name }}
+                  </span>
+                </div>
+              {% endif %}
+              {% if party.email %}
+                <div class="flex items-center space-x-1 mt-1">
+                  {{ svg_icon('mail', class='w-5 h-5 shrink-0') }}
+                  <span class="truncate">
+                    {{ party.email }}
+                  </span>
+                </div>
+              {% endif %}
+              {% if party.phone %}
+                <div class="flex items-center space-x-1 mt-1">
+                  {{ svg_icon('phone', class='w-5 h-5 shrink-0') }}
+                  <span class="truncate">
+                    {{ party.phone }}
+                  </span>
+                </div>
+              {% endif %}
+              <div class="flex items-center space-x-1 mt-1">
+                  {{ svg_icon(party.icon, class='w-5 h-5 shrink-0') }}
+                <span class="truncate">
+                    {{ party.status }}
+                </span>
+              </div>
+              {% if party.decline_reason_html is defined %}
+                <div class="flex items-center space-x-1 mt-1">
+                  <span>
+                    {{ t('reason') }}:
+                    {{ party.decline_reason_html | safe }}
+                  </span>
+                </div>
+              {% endif %}
+              {% if party.send_email %}
+                <div class="mt-2 mb-1">
+                  <form class="button_to" method="post" action="/submitters/{{ party.id }}/send_email"><button class="btn btn-sm btn-primary w-full" type="submit">{{ buttons.button_title(title=party.send_email, disabled_with=t('sending')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /></form>
+                </div>
+              {% endif %}
+              {% if party.send_sms %}
+  <div class="mt-2 mb-1">
+    <div class="tooltip tooltip-no-touch w-full" data-tip="{{ t('unlock_with_docuseal_pro') }}">
+      <button type="button" class="btn btn-sm btn-primary text-gray-400 w-full" disabled>{{ party.send_sms }}</button>
+    </div>
+  </div>
+              {% endif %}
+              {% if party.sign_in_person %}
+                <div class="mt-2 mb-1">
+                  <a class="btn btn-sm btn-primary w-full" target="_blank" href="/s/{{ party.slug }}">
+                    {{ t('sign_in_person') }}
+                  </a>
+                </div>
+              {% endif %}
+              {% if party.resubmit %}
+                <div class="mt-2 mb-1">
+                  <form target="_blank" class="button_to" method="post" action="/submitters_resubmit/{{ party.id }}"><input type="hidden" name="_method" value="put" /><button class="btn btn-sm btn-primary w-full" data-turbo="false" type="submit">{{ t('resubmit') }}</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /></form>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="px-1.5 mb-4">
+            {% for field in party.fields %}
+              <div class="pt-2.5 border-b border-base-300">
+                <div class="text-xs font-medium uppercase mb-0.5" dir="auto">
+                  {{ field.label }}
+                </div>
+                <div dir="auto">
+                  {% if field.kind == 'image' and not field.bare %}
+                    <div class="w-full bg-base-300 py-1">
+                      <img class="object-contain mx-auto" style="{{ field.image.style }}" height="{{ field.image.height }}" width="{{ field.image.width }}" src="{{ field.image.src }}" loading="lazy" alt="{{ field.alt }}">
+                    </div>
+                  {% elif field.kind == 'image' %}
+                    <img class="object-contain mx-auto" style="{{ field.image.style }}" height="{{ field.image.height }}" width="{{ field.image.width }}" src="{{ field.image.src }}" loading="lazy" alt="{{ field.alt }}">
+                  {% elif field.kind == 'files' %}
+                    <div class="flex flex-col justify-center">
+                      {% for file in field.files %}
+                        <a target="_blank" class="flex items-center space-x-1" href="{{ file.url }}">
+                          {{ svg_icon('paperclip', class='w-4 h-4') }}
+                          <span>
+                            {{ file.filename }}
+                          </span>
+                        </a>
+                      {% endfor %}
+                    </div>
+                  {% elif field.kind == 'check' %}
+                    {{ svg_icon('check', class='w-6 h-6') }}
+                  {% elif field.kind == 'masked' %}
+                        <div class="[&:not(:hover)]:after:content-[attr(data-value)] block whitespace-pre-wrap group" data-value="{{ field.masked }}"><span class="hidden group-hover:block">{{ field.text }}</span></div>
+                  {% else %}
+                        <div class="whitespace-pre-wrap">{{ field.text }}</div>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+  </div>
+    <toggle-visible data-element-ids="[&quot;document_view&quot;,&quot;parties_view&quot;]">
+      <label class="md:hidden btn btn-sm btn-neutral text-white text-base z-10 fixed bottom-2 right-2 h-16 shadow-lg">
+        <input type="checkbox" class="peer hidden" data-action="click:toggle-visible#trigger">
+        <span class="peer-checked:hidden flex items-center space-x-2">
+          {{ svg_icon('users', class='w-8 h-8') }}
+          <span>{{ t('signers') }}</span>
+        </span>
+        <span class="hidden peer-checked:flex items-center">
+          {{ svg_icon('chevron_left', class='w-8 h-8') }}
+          <span>{{ t('back') }}</span>
+        </span>
+      </label>
+    </toggle-visible>
+</div>
+{% if autosize_script %}
+  {% include "scripts/_autosize_field.html" %}
+{% endif %}
+{% endblock %}

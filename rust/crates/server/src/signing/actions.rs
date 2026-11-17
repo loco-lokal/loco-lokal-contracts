@@ -335,7 +335,8 @@ pub async fn upload(
     };
 
     let kind = params.str("type").unwrap_or_default();
-    let mut metadata = json!({});
+    // `ActiveStorage::AnalyzeJob` marks other files analyzed (there are no analyzers).
+    let mut metadata = json!({ "identified": true, "analyzed": true });
     if kind == "initials" || kind == "signature" {
         let Some(image) = crate::images::load(&file.data, &file.content_type) else {
             return Ok(error(format!(
@@ -380,13 +381,54 @@ pub async fn upload(
         &blob,
     )
     .await?;
+    // `touch_attachment_records`
+    signing::touch_submitter(&state.db, form.submitter.id).await?;
     let origin = request_origin(&state, &headers);
-    Ok(crate::api::ok(&attachment_json(
-        &state,
-        &origin,
-        &attachment,
-        &blob,
-    )))
+    let mut response = crate::api::ok(&attachment_json(&state, &origin, &attachment, &blob));
+    if params.str("remember_signature").as_deref() == Some("true")
+        && let Some(email) = form
+            .submitter
+            .email
+            .as_deref()
+            .filter(|e| !e.trim().is_empty())
+    {
+        let json = remembered_signatures_json(&state, &headers, email, &attachment.uuid);
+        crate::cookies::set_permanent_encrypted(
+            &state,
+            &mut response,
+            super::pages::SIGNATURE_UUIDS_COOKIE,
+            &json,
+        );
+    }
+    Ok(response)
+}
+
+/// `SubmitFormUploadController::COOKIE_STORE_LIMIT`.
+const COOKIE_STORE_LIMIT: usize = 10;
+
+/// `build_new_cookie_signatures_json`: the cookie's signatures by email with this one, the
+/// last ten kept.
+fn remembered_signatures_json(
+    state: &AppState,
+    headers: &HeaderMap,
+    email: &str,
+    uuid: &str,
+) -> String {
+    let mut values =
+        crate::cookies::encrypted(state, headers, super::pages::SIGNATURE_UUIDS_COOKIE)
+            .filter(|s| !s.trim().is_empty())
+            .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+            .and_then(|v| match v {
+                Value::Object(map) => Some(map),
+                _ => None,
+            })
+            .unwrap_or_default();
+    values.insert(email.to_owned(), Value::String(uuid.to_owned()));
+    if values.len() > COOKIE_STORE_LIMIT {
+        let skip = values.len() - COOKIE_STORE_LIMIT;
+        values = values.into_iter().skip(skip).collect();
+    }
+    crate::api::rails_json(&Value::Object(values))
 }
 
 /// `Submitters.fetch_values_for_delegate`: the values without the party's signatures,
