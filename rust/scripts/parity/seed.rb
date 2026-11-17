@@ -5,8 +5,26 @@
 #
 # Prints PARITY_TOKEN (the first user's API token) and PARITY_TEMPLATE_ID, and creates the
 # parity-viewer@example.com user.
+#
+# With a third argument `combined`, seeds a separate "Parity Combined" account with
+# `combine_pdf_result_key` enabled instead (for combined.py), so that the setting does
+# not change what the other checks see in the first account.
 
 user = User.order(:id).first || abort('Complete the first-run setup first.')
+
+combined = ARGV[2] == 'combined'
+
+if combined
+  account = Account.find_by(name: 'Parity Combined') ||
+            Account.create!(name: 'Parity Combined', timezone: user.account.timezone, locale: user.account.locale)
+
+  user = account.users.find_by(email: 'parity-combined@example.com') ||
+         account.users.create!(email: 'parity-combined@example.com', first_name: 'Parity', last_name: 'Combined',
+                               password: SecureRandom.hex(16), role: 'admin')
+
+  account.account_configs.find_or_initialize_by(key: AccountConfig::COMBINE_PDF_RESULT_KEY).update!(value: true)
+end
+
 token = user.access_token || user.create_access_token!
 
 template = user.account.templates.find_by(name: 'Parity NDA')
@@ -236,7 +254,7 @@ end
 
 # A second user of the account with a known password, for the signed-in page checks
 # (preview.py signs in with it on both servers).
-unless user.account.users.exists?(email: 'parity-viewer@example.com')
+unless combined || User.exists?(email: 'parity-viewer@example.com')
   User.create!(account: user.account, email: 'parity-viewer@example.com', password: 'parity-viewer-password',
                first_name: 'Parity', last_name: 'Viewer', role: User::ADMIN_ROLE)
 end

@@ -388,14 +388,7 @@ impl ShowView<'_> {
         let form = self.form;
         let submission = &form.submission;
         let configs = FormConfigs::load(state, form.account.id).await?;
-        let combine = signing::account_configs(
-            &state.db,
-            form.account.id,
-            &[super::audit::COMBINE_PDF_RESULT_KEY],
-        )
-        .await?
-        .iter()
-        .any(|(_, v)| *v == Value::Bool(true));
+        let combine = super::combined::enabled(state, form.account.id).await?;
         let is_combined_enabled = combine
             && !form
                 .fields()
@@ -1175,17 +1168,16 @@ pub async fn download(
             return Ok(StatusCode::NOT_FOUND.into_response());
         }
     }
-    let last_form = Form::for_submitter(&state, last.clone()).await?;
     if params.str("combined").as_deref() == Some("true") {
-        // `build_combined_url` is nil until the submission completes, and for any party
-        // but the last one.
-        if last_form.submission.completed_at.is_none() {
-            return Ok(StatusCode::NOT_FOUND.into_response());
-        }
-        return Ok(downloads::combined_unsupported());
-    }
-    if downloads::uses_combined(&state, &last_form).await? {
-        return Ok(downloads::combined_unsupported());
+        // `respond_with_combined`: `build_combined_url` is nil until the submission
+        // completes, and for any party but the last one.
+        let last_form = Form::for_submitter(&state, last).await?;
+        return Ok(
+            match super::combined::build_combined_url(&state, &last_form).await? {
+                Some(url) => crate::api::ok(&Value::Array(vec![Value::String(url)])),
+                None => StatusCode::NOT_FOUND.into_response(),
+            },
+        );
     }
     let urls = downloads::build_document_urls(&state, last).await?;
     Ok(crate::api::ok(&urls))

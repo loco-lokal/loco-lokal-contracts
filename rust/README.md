@@ -119,6 +119,7 @@ cd rust/scripts/parity
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
 ./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
+./combined.py                                        # combine_pdf_result_key, in its own account: combined PDF, rows, emails, downloads, API
 ./preview.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # submission preview /e/:slug (signed out, sig, signed in), /e/:slug/completed, /e/:slug/download, /p/:slug
 ./email_2fa.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # email one-time codes on /s/:slug and /d/:slug: pages, redirects, emails, otp_challenges and events
 ```
@@ -192,15 +193,24 @@ Result documents and their signatures, continued (issue #5):
 - Stamp fields (`signing/stamp.rs`, `Submitters::CreateStampAttachment`): completing a party adds its stamp image (`stamp.png`, reused by checksum) as the field's value. The logo and the half transparent white layer are composited as libvips does, and the text is laid out like `Vips::Image.text` (`loco_pdf::text_image`): Pango's runs, wrapping (hyphens inside words), line metrics and the autofit search, shaped with `harfrust` and hinted as fontconfig's `hintslight` has FreeType do. Its font is GoNoto Kurrent, which fontconfig picks for `sans` in the Docker image. The anti-aliasing differs slightly from FreeType's, so the PNG is close to Rails' but not identical: `signing.py` compares stamps with a tolerance and the rest of the result pages exactly.
 - Right-to-left text (`loco_domain::bidi`, `TextUtils.maybe_rtl_reverse`) in result documents and the audit trail: Arabic letters in their presentation forms (`ArabicLetterConnector`), then TwitterCldr's own Bidi algorithm with its quirks, and right alignment where Rails uses it. The bidi classes and the `RTL_REGEXP` code points come from Rails (`scripts/dump-bidi-classes.sh`, which also refreshes the test fixture of Rails' output for sample texts).
 
+Combined result documents (`combine_pdf_result_key`):
+
+- `signing/combined.rs` ports `Submissions::GenerateCombinedAttachment` and `EnsureCombinedGenerated`: the last party's documents as `generate_pdfs` fills them, in schema order, then the audit trail in the account's locale, in one PDF signed like the results and attached to the submission as `combined_document`. The completion job generates it before the audit trail, so `combined_document_url` is filled in the API and webhooks.
+- `loco_pdf::edit::Editor::import_pages` copies pages with what they reference into another document, as `HexaPDF::Importer` does.
+- Downloads (`Submitters.select_attachments_for_download` and `?combined=true` with `build_combined_url`, also on `/e/:slug/download`) and the completed and documents copy emails use the combined document; the emails then leave out the separate audit trail.
+- `GET`/`PUT /api/submissions/:id` and `GET /api/submissions` with `include=combined_document_url` generate missing combined documents.
+- Unported branches reached from a request (custom certificates, timestamp servers, `PDF_FORMAT=pdf/a-3b`, right-to-left text in the audit trail, …) answer 422 with their "not supported yet" message.
+
+`combined.py` covers these, in its own account so that the setting does not change what the other checks see.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
   - dynamic documents;
   - form field appearances where HexaPDF would fail and Rails would leave the form unflattened: text the field's font cannot encode, embedded TrueType or symbol fonts, CMYK text, `AFTime_Format`, combo boxes with several values, and list box values that are not options;
   - signing with the `docuseal_aatl` certificate without `CERTS`, with a certificate without its private key, or with a non-RSA key.
-- Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet".
 - Share link email two-factor verification for a party without an email (a `link_form_fields` without `email`) answers 422.
-- Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission), including `/e/:slug/download`, answer 422.
+- The signed-in download link of the dashboard (`/submissions/:id/download`), including its `?combined=true`.
 - The submission preview `/e/:slug` in the mobile app (`Hotwire Native` user agents) and for dynamic documents answers 422.
 - Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).

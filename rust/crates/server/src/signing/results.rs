@@ -64,12 +64,17 @@ pub(super) const PDF_A_3B: &str = "pdf/a-3b";
 const CHECK_COMPLETE_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub(super) fn unsupported(what: &str) -> AppError {
-    anyhow::anyhow!("{what} is not supported yet").into()
+    AppError::Unsupported(format!("{what} is not supported yet"))
 }
 
 #[allow(clippy::needless_pass_by_value, reason = "used with map_err")]
 pub(super) fn pdf_error(err: EditError) -> AppError {
-    anyhow::anyhow!("result documents: {err}").into()
+    match err {
+        EditError::Unsupported(what) => {
+            AppError::Unsupported(format!("{what} is not supported yet"))
+        }
+        err => anyhow::anyhow!("result documents: {err}").into(),
+    }
 }
 
 /// `Submissions::EnsureResultGenerated.call(submitter)`: the submitter's result documents,
@@ -189,12 +194,25 @@ impl Configs {
 }
 
 /// A document being filled, by its schema `attachment_uuid`.
-struct Pdf {
-    uuid: String,
-    editor: Editor,
+pub(super) struct Pdf {
+    pub(super) uuid: String,
+    pub(super) editor: Editor,
     /// The schema document is an image (`original_documents.find { … }.image?`), even when
     /// the PDF is a previous party's result.
     is_image: bool,
+}
+
+/// `generate_pdfs(submitter)`: the documents with the submitter's values drawn on them,
+/// not saved yet.
+pub(super) async fn generate_pdfs(state: &AppState, form: &Form) -> Result<Vec<Pdf>, AppError> {
+    let configs = Configs::load(state, form.account.id).await?;
+    let mut pdfs = build_pdfs_index(state, form, configs.flatten).await?;
+
+    if configs.with_signature_id || form.account.testing {
+        add_document_id(state, form, &configs, &mut pdfs)?;
+    }
+    fill_submitter_fields(state, form, &configs, &mut pdfs).await?;
+    Ok(pdfs)
 }
 
 /// `GenerateResultAttachments.call(submitter)`.
@@ -203,13 +221,7 @@ async fn generate(
     submitter: &Submitter,
 ) -> Result<Vec<(Attachment, Blob)>, AppError> {
     let form = Form::for_submitter(state, submitter.clone()).await?;
-    let configs = Configs::load(state, form.account.id).await?;
-    let mut pdfs = build_pdfs_index(state, &form, configs.flatten).await?;
-
-    if configs.with_signature_id || form.account.testing {
-        add_document_id(state, &form, &configs, &mut pdfs)?;
-    }
-    fill_submitter_fields(state, &form, &configs, &mut pdfs).await?;
+    let mut pdfs = generate_pdfs(state, &form).await?;
 
     let key = load_signing_key(state, form.account.id).await?;
     let timestamp = TimestampHandler::load(state, form.account.id)
@@ -1505,7 +1517,7 @@ pub(super) struct Signer {
 
 /// `build_pdf_attachment`, first half: the document saved as an incremental update, signed
 /// when there is a signer, with `PDF_FORMAT=pdf/a-3b` as PDF/A-3b.
-async fn save_pdf(
+pub(super) async fn save_pdf(
     state: &AppState,
     mut editor: Editor,
     signer: Option<&Signer>,

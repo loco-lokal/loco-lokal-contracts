@@ -185,11 +185,7 @@ impl Editor {
     /// copied onto the page.
     pub fn merge(sources: &[&[u8]], now: &str) -> Result<Self, EditError> {
         let mut merged = Self::blank()?;
-        let pages_id = merged
-            .catalog()
-            .and_then(|c| c.get(b"Pages").ok())
-            .and_then(|p| p.as_reference().ok())
-            .ok_or_else(|| EditError::Invalid("no page tree".to_owned()))?;
+        let pages_id = merged.pages_root()?;
         let mut kids = Vec::new();
         for bytes in sources {
             let source = Document::load_mem(bytes)?;
@@ -235,11 +231,7 @@ impl Editor {
 
     /// Appends an empty page with the media box `[0 0 width height]`.
     pub fn add_page(&mut self, width: f64, height: f64) -> Result<ObjectId, EditError> {
-        let pages_id = self
-            .catalog()
-            .and_then(|c| c.get(b"Pages").ok())
-            .and_then(|p| p.as_reference().ok())
-            .ok_or_else(|| EditError::Invalid("no page tree".to_owned()))?;
+        let pages_id = self.pages_root()?;
         let mut page = Dictionary::new();
         page.set("Type", Object::Name(b"Page".to_vec()));
         page.set("Parent", Object::Reference(pages_id));
@@ -265,6 +257,58 @@ impl Editor {
             pages.set("Kids", Object::Array(kids));
         }
         Ok(id)
+    }
+
+    /// The document as edited so far, with fonts, overlays and resources written out, to
+    /// import pages from (`pdf.dispatch_message(:complete_objects)`).
+    pub fn into_document(mut self) -> Result<Document, EditError> {
+        self.finish()?;
+        Ok(self.doc)
+    }
+
+    /// `source.pages.each { |page| pages << import(page) }`: appends deep copies of the
+    /// source's pages with everything they reference, as `HexaPDF::Importer` does. The
+    /// catalog and page tree nodes are not copied (references to them become `null`), so
+    /// form fields and signatures of the source are left behind, while their widgets
+    /// stay on the pages. Inherited page attributes are copied onto each page.
+    pub fn import_pages(&mut self, source: &Document) -> Result<(), EditError> {
+        let pages_id = self.pages_root()?;
+        let mut importer = Importer {
+            source,
+            map: HashMap::new(),
+        };
+        let mut new_kids = Vec::new();
+        for page in source.get_pages().into_values() {
+            let Some(id) = importer.import(page, self) else {
+                continue;
+            };
+            if let Some(dict) = self.dict_mut(id) {
+                dict.set("Parent", Object::Reference(pages_id));
+            }
+            new_kids.push(Object::Reference(id));
+        }
+        if let Some(pages) = self.dict_mut(pages_id) {
+            let mut kids = pages
+                .get(b"Kids")
+                .ok()
+                .and_then(|k| k.as_array().ok())
+                .cloned()
+                .unwrap_or_default();
+            kids.extend(new_kids);
+            pages.set(
+                "Count",
+                Object::Integer(i64::try_from(kids.len()).unwrap_or(0)),
+            );
+            pages.set("Kids", Object::Array(kids));
+        }
+        Ok(())
+    }
+
+    fn pages_root(&self) -> Result<ObjectId, EditError> {
+        self.catalog()
+            .and_then(|c| c.get(b"Pages").ok())
+            .and_then(|p| p.as_reference().ok())
+            .ok_or_else(|| EditError::Invalid("no page tree".to_owned()))
     }
 
     fn catalog(&self) -> Option<&Dictionary> {

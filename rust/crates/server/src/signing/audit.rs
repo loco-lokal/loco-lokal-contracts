@@ -28,7 +28,7 @@ use super::{
         FONT_BOLD_NAME, FONT_NAME, PDF_A_3B, SIGN_REASON, Signer, TESTING_FOOTER,
         UNSUPPORTED_IMAGE_TYPES, Uploads, WITH_FILE_LINKS_KEY, WITH_SIGNATURE_ID,
         WITH_SUBMITTER_TIMEZONE_KEY, WITH_TIMESTAMP_SECONDS_KEY, default_font, is_rtl,
-        load_signing_key, maybe_rtl_reverse, ruby_to_s, save_document, unsupported, wrap,
+        load_signing_key, maybe_rtl_reverse, ruby_to_s, save_document, wrap,
     },
     timestamp::TimestampHandler,
 };
@@ -52,24 +52,18 @@ const LOGO_PNG: &[u8] = include_bytes!("../../../../../lib/pdf_icons/logo.png");
 
 const WITH_AUDIT_VALUES_KEY: &str = "with_audit_values";
 const WITH_AUDIT_SENDER_KEY: &str = "with_audit_sender";
-pub(super) const COMBINE_PDF_RESULT_KEY: &str = "combine_pdf_result_key";
 
 /// `EnsureAuditGenerated::CHECK_COMPLETE_TIMEOUT`.
 const CHECK_COMPLETE_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[allow(clippy::needless_pass_by_value, reason = "used with map_err")]
 fn pdf_error(err: EditError) -> AppError {
-    anyhow::anyhow!("audit trail: {err}").into()
-}
-
-/// `account.account_configs.exists?(key: COMBINE_PDF_RESULT_KEY, value: true)`: combined
-/// results are not ported.
-pub async fn check_combined(state: &AppState, account_id: i64) -> Result<(), AppError> {
-    let rows = signing::account_configs(&state.db, account_id, &[COMBINE_PDF_RESULT_KEY]).await?;
-    if rows.iter().any(|(_, v)| *v == Value::Bool(true)) {
-        return Err(unsupported("Combining the result documents into one PDF"));
+    match err {
+        EditError::Unsupported(what) => {
+            AppError::Unsupported(format!("{what} is not supported yet"))
+        }
+        err => anyhow::anyhow!("audit trail: {err}").into(),
     }
-    Ok(())
 }
 
 /// `Submissions::EnsureAuditGenerated.call(submission)`: the audit trail attachment,
@@ -390,8 +384,23 @@ impl Data<'_> {
     }
 }
 
-/// `GenerateAuditTrail.call(submission)`.
-async fn generate(state: &AppState, submission_id: i64) -> Result<(Attachment, Blob), AppError> {
+/// `build_audit_trail(submission)` in the account's locale, as
+/// `GenerateCombinedAttachment` appends it: not signed, without the PDF/A metadata (the
+/// catalog is not imported).
+pub(super) async fn build_audit_trail(
+    state: &AppState,
+    submission_id: i64,
+) -> Result<Editor, AppError> {
+    let mut data = load(state, submission_id).await?;
+    data.locale = data.form.account.locale.clone();
+    let mut editor = Editor::blank().map_err(pdf_error)?;
+    build(&mut data, &mut editor).await?;
+    Ok(editor)
+}
+
+/// The submission, its last completed party and everything `build_audit_trail` reads,
+/// with `I18n.locale` set as `GenerateAuditTrail.call` does.
+async fn load(state: &AppState, submission_id: i64) -> Result<Data<'_>, AppError> {
     let submitters = submissions::submitters_for(&state.db, &[submission_id]).await?;
     let last = submitters
         .iter()
@@ -443,7 +452,7 @@ async fn generate(state: &AppState, submission_id: i64) -> Result<(Attachment, B
             },
         );
     }
-    let mut data = Data {
+    Ok(Data {
         state,
         form,
         configs,
@@ -452,8 +461,12 @@ async fn generate(state: &AppState, submission_id: i64) -> Result<(Attachment, B
         events,
         versions,
         uploads,
-    };
+    })
+}
 
+/// `GenerateAuditTrail.call(submission)`.
+async fn generate(state: &AppState, submission_id: i64) -> Result<(Attachment, Blob), AppError> {
+    let mut data = load(state, submission_id).await?;
     // `build_signing_params(last_submitter, pkcs, tsa_url)`.
     let signer = match load_signing_key(state, data.form.account.id).await? {
         Some(key) => Some(Signer {
@@ -772,9 +785,9 @@ async fn build(data: &mut Data<'_>, editor: &mut Editor) -> Result<(), AppError>
     Ok(())
 }
 
-/// `Submitters.select_attachments_for_download(submitter)`: the result documents,
-/// without image documents' pages when there are several images. Combined results are
-/// rejected by `check_combined` before.
+/// `select_attachments(submitter)`: the result documents, without image documents' pages
+/// when there are several images. Downloads and emails use
+/// `combined::select_attachments_for_download`, which may pick the combined document.
 pub(super) async fn select_attachments(
     state: &AppState,
     form: &Form,

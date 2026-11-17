@@ -353,16 +353,21 @@ def pdf_info(pdf):
 
 
 def compare_audit(rails_id, rust_id, label):
-    """The audit trails of two submissions: word positions (per-run tokens such as ids may
-    differ in text, not in position), the page renders, the metadata and the signature."""
+    """The audit trails of two submissions."""
+    compare_documents(audit_pdf(rails_id), audit_pdf(rust_id), label)
+
+
+def compare_documents(a, b, label):
+    """Two generated PDFs (audit trails, combined documents): word positions (per-run
+    tokens such as ids may differ in text, not in position), the page renders, the
+    metadata and the signature."""
     global FAILURES
-    a, b = audit_pdf(rails_id), audit_pdf(rust_id)
     if a is None and b is None:
         print(f"ok   {label} [none]")
         return
     if a is None or b is None:
         FAILURES += 1
-        print(f"FAIL {label}: audit trail rails {a is not None} rust {b is not None}")
+        print(f"FAIL {label}: rails {a is not None} rust {b is not None}")
         return
     problems = []
     wa, wb = words(a), words(b)
@@ -466,19 +471,22 @@ RTL = {"first": "דוד כהן", "second": "سارة أحمد", "full_name": "ד
        "approver": "محمد أحمد 123 - Approved"}
 
 
-def run_signed(base, token, template_id, fields, rtl=False):
+def run_signed(base, token, template_id, fields, rtl=False, send_email=False,
+               emails=("ana@example.test", "bob@example.test"), order="preserved", on_created=None):
     """A submission both parties complete, so its result documents and audit trail are
     signed. Repeated form views make the event log long enough to continue on a second
     page of the audit trail. With `rtl`, the names and text values are right-to-left."""
     status, created = call(
         RAILS, token, "POST", "/api/submissions",
-        {"template_id": template_id, "send_email": False,
-         "submitters": [{"role": "First Party", "email": "ana@example.test",
+        {"template_id": template_id, "send_email": send_email, "order": order,
+         "submitters": [{"role": "First Party", "email": emails[0],
                          "name": RTL["first"] if rtl else "Ana Example"},
-                        {"role": "Second Party", "email": "bob@example.test", "phone": "+4915112345678",
+                        {"role": "Second Party", "email": emails[1], "phone": "+4915112345678",
                          **({"name": RTL["second"]} if rtl else {})}]},
     )
     assert status == 200, created
+    if on_created:
+        on_created(created)
     values = {
         "First Party": [(fields["Full Name"], RTL["full_name"] if rtl else "Ana Example"),
                         (fields["Start Date"], "2026-03-14"), (fields["Plan"], "Pro")],
