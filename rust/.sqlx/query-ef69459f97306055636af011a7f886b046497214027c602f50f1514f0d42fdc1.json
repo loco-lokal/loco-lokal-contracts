@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE otp_challenges SET attempts = COALESCE(attempts, 0) + 1 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef69459f97306055636af011a7f886b046497214027c602f50f1514f0d42fdc1"
+}
