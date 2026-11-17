@@ -4,6 +4,8 @@
 pub mod cms;
 pub mod edit;
 pub mod image_page;
+pub mod jpeg;
+pub mod pages;
 pub mod signatures;
 pub mod text;
 pub mod text_image;

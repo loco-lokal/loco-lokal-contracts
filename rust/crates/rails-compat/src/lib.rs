@@ -7,6 +7,7 @@
 //! - `devise`: reset-token digests, friendly tokens, and TOTP codes
 //! - `cookies`: `cookies.encrypted` values (`ActiveSupport::MessageEncryptor`)
 //! - `csrf`: masked per-session authenticity tokens, as `form_authenticity_token` produces
+//! - `json`: `to_json` output (the `json` gem's float format, Active Support's escaping)
 //!
 //! [`RailsSecrets`] derives every key from `SECRET_KEY_BASE` / `ENCRYPTION_SECRET` the way
 //! `config/environments/production.rb` and the Rails railties do.
@@ -15,6 +16,7 @@ pub mod cookies;
 pub mod csrf;
 pub mod devise;
 pub mod encryption;
+pub mod json;
 pub mod key_generator;
 pub mod message_verifier;
 pub mod password;

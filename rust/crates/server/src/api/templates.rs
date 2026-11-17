@@ -433,6 +433,28 @@ pub async fn destroy(
 
 /// `Templates::Clone.update_submitters_and_fields_and_schema`: new uuids for roles and
 /// fields, with every reference to them rewritten.
+/// `text.gsub(Regexp.union(keys), map)`: one left-to-right pass, where the first key (in
+/// `keys` order) that matches at a position wins, so replaced text is never matched again.
+fn replace_union(text: &str, keys: &[String], map: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        let hit = keys
+            .iter()
+            .filter(|key| !key.is_empty())
+            .find(|key| rest.starts_with(key.as_str()));
+        if let Some(key) = hit {
+            out.push_str(&map[key]);
+            rest = &rest[key.len()..];
+        } else {
+            let c = rest.chars().next().unwrap_or_default();
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    out
+}
+
 fn renew_uuids(
     submitters: &mut Value,
     fields: &mut Value,
@@ -441,6 +463,8 @@ fn renew_uuids(
 ) {
     let mut submitter_map: HashMap<String, String> = HashMap::new();
     let mut field_map: HashMap<String, String> = HashMap::new();
+    // The old field uuids in insertion order, as `Regexp.union(replacements.keys)` tries them.
+    let mut field_order: Vec<String> = Vec::new();
     let lookup = |map: &HashMap<String, String>, value: Option<&Value>| -> Value {
         value
             .and_then(Value::as_str)
@@ -466,8 +490,10 @@ fn renew_uuids(
     }
     for field in fields.as_array_mut().into_iter().flatten() {
         let new = uuid::Uuid::new_v4().to_string();
-        if let Some(old) = field.get("uuid").and_then(Value::as_str) {
-            field_map.insert(old.to_owned(), new.clone());
+        if let Some(old) = field.get("uuid").and_then(Value::as_str)
+            && field_map.insert(old.to_owned(), new.clone()).is_none()
+        {
+            field_order.push(old.to_owned());
         }
         field["uuid"] = Value::String(new);
         let submitter_uuid = lookup(&submitter_map, field.get("submitter_uuid"));
@@ -491,10 +517,7 @@ fn renew_uuids(
             .and_then(Value::as_str)
             .filter(|f| !f.trim().is_empty())
         {
-            let mut formula = formula.to_owned();
-            for (old, new) in &field_map {
-                formula = formula.replace(old, new);
-            }
+            let formula = replace_union(formula, &field_order, &field_map);
             field["preferences"]["formula"] = Value::String(formula);
         }
     }
@@ -702,6 +725,28 @@ pub async fn clone(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replaces_formula_uuids_in_one_pass() {
+        let keys = vec![
+            "f1".to_owned(),
+            "f2".to_owned(),
+            "ab".to_owned(),
+            "abc".to_owned(),
+        ];
+        let map: HashMap<String, String> =
+            [("f1", "n-f2-n"), ("f2", "m"), ("ab", "X"), ("abc", "Y")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect();
+        // A new uuid containing another old one is not rewritten again, and the first
+        // matching key wins, as with `gsub(Regexp.union(keys), map)`.
+        assert_eq!(
+            replace_union("{{f1}} + {{f2}}", &keys, &map),
+            "{{n-f2-n}} + {{m}}"
+        );
+        assert_eq!(replace_union("abc é", &keys, &map), "Xc é");
+    }
 
     #[test]
     fn renews_clone_uuids_and_references() {

@@ -115,5 +115,17 @@ pub fn router() -> Router<AppState> {
             get(crate::files::show),
         )
         .route("/disk/{encoded_key}/{*filename}", get(crate::disk::show))
+        .route(
+            "/preview/{signed_key}/{id}",
+            get(crate::template_preview::page_image),
+        )
+        .route(
+            "/templates/{template_id}/preview",
+            get(crate::template_preview::show),
+        )
+        .route(
+            "/templates/{template_id}/documents_page_objects",
+            get(crate::template_preview::page_objects),
+        )
         .merge(crate::signing::router())
 }

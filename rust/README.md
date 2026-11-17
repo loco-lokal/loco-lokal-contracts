@@ -125,6 +125,7 @@ cd rust/scripts/parity
 ./preview.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # submission preview /e/:slug (signed out, sig, signed in), /e/:slug/completed, /e/:slug/download, /p/:slug
 ./email_2fa.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # email one-time codes on /s/:slug and /d/:slug: pages, redirects, emails, otp_challenges and events
 ./uploads.py "$PARITY_TOKEN"                         # template uploads and added documents: responses, stored rows, preview PNGs
+./previews.py                                        # /preview/:signed_key/:page, /templates/:id/preview, documents_page_objects (seeds its own template)
 ```
 
 `uploads.py` signs in on both servers as a user that `uploads_seed.rb` creates with a known password, and uploads PDFs (form fields, links, 18 pages, a password) and images that the seed builds with HexaPDF and libvips. It needs Pillow, and reads the stored previews through the `rails` service.
@@ -233,6 +234,16 @@ Template uploads port `TemplatesUploadsController#create` (`POST /templates_uplo
 
 Preview pages of PDFs come out pixel for pixel as in Rails, although the two `PDFium` builds differ. Rails' build reads checkbox and radio states through its own "raw" functions; the Rust server loads the page's form view instead, so the standard functions see them too. Previews of uploaded images differ slightly (mean difference below 0.3 of 255), because `image`'s filters replace libvips' resize, so their palettes can have a few more or fewer colors. The PNG compression differs as well, so preview byte sizes and checksums are not the same as Rails'.
 
+The document page endpoints around the template builder:
+
+- `template_preview.rs`: the lazy `/preview/:signed_key/:page` images (`PreviewDocumentPageController`). A page without a stored preview is rendered with PDFium and stored as `"#{page}.jpg"` with Rails' blob metadata; stored previews redirect to their disk URL.
+- `loco_pdf::jpeg` writes these JPEGs as libvips with libjpeg-turbo does (`interlace: true, Q: PAGE_QUALITY`): its EXIF block, 4:2:0, the islow DCT, the simple progression script and optimized Huffman tables. The files are byte for byte Rails'.
+- `/templates/:id/preview` (`TemplatesPreviewController`): the read-only builder in the `plain` layout, with `Templates.serialize_for_builder` as `data-template`.
+- `/templates/:id/documents_page_objects` (`TemplateDocumentsPageObjectsController`): `loco_pdf::pages` flattens the page, unwraps form XObjects and applies the rotation through PDFium, as `lib/pdfium.rb` does, and sorts the characters with musl's `qsort_r` (what Ruby's `sort` calls in the Rails image).
+- `loco_rails_compat::json` writes floats as the `json` gem (2.21, `fpconv`) does, so `render json:` bodies match Rails' digits. `api::rails_json` uses it for every response.
+
+`previews.py` covers these. `/templates/:id/preview` in the Hotwire Native apps answers 422.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -243,7 +254,8 @@ These parts return 422 ("not supported yet") or are still missing:
 - The signed-in download link of the dashboard (`/submissions/:id/download`), including its `?combined=true`.
 - The submission preview `/e/:slug` in the mobile app (`Hotwire Native` user agents) and for dynamic documents answers 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).
-- Dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
+- Dynamic documents (422 on the page; Phase 5).
+- `/templates/:id/preview` in the Hotwire Native apps (422).
 - Presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
 - Prefilling attachment fields with typed text (Rails renders it in a font) or with file types other than PNG, JPEG and PDF.
 - Stamp fields of a recipient that `POST /api/submissions` creates as `completed` answer 422.
