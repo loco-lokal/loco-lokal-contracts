@@ -216,14 +216,34 @@ pub(crate) async fn record_delivery(
     submitter_id: i64,
     delivered: &loco_mailer::Delivered,
 ) {
+    record_delivery_for(
+        state,
+        account_id,
+        tag,
+        message_uuid,
+        ("Submitter", submitter_id),
+        delivered,
+    )
+    .await;
+}
+
+/// [`record_delivery`] for any emailable record (`record_type`, `record_id`).
+pub(crate) async fn record_delivery_for(
+    state: &AppState,
+    account_id: i64,
+    tag: &str,
+    message_uuid: &str,
+    (emailable_type, emailable_id): (&str, i64),
+    delivered: &loco_mailer::Delivered,
+) {
     let data = JsonText(json!({ "from": delivered.from, "method": delivered.method }));
     for address in &delivered.to {
         let event = NewEmailEvent {
             account_id,
             tag,
             message_id: message_uuid,
-            emailable_type: "Submitter",
-            emailable_id: submitter_id,
+            emailable_type,
+            emailable_id,
             event_type: "send",
             email: address,
             data: &data,

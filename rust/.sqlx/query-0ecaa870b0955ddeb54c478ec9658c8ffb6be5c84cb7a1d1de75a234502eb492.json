@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO otp_challenges (key, version, nonce, expire_at, attempts, created_at)\n           VALUES ($1, $2, $3, $4, 0, (now() AT TIME ZONE 'utc'))\n           ON CONFLICT (key, version) DO NOTHING RETURNING nonce",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "nonce",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "otp_challenges",
+            "name": "nonce"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int4",
+        "Varchar",
+        "Timestamp"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0ecaa870b0955ddeb54c478ec9658c8ffb6be5c84cb7a1d1de75a234502eb492"
+}
