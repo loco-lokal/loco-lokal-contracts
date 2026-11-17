@@ -64,6 +64,25 @@ pub async fn has_event(
     .await?)
 }
 
+/// Whether the submitter has an event of `event_type` created at or after `since`.
+pub async fn has_event_since(
+    db: impl PgExecutor<'_>,
+    submitter_id: i64,
+    event_type: &str,
+    since: NaiveDateTime,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM submission_events
+                          WHERE submitter_id = $1 AND event_type = $2 AND created_at >= $3)
+             AS "exists!""#,
+        submitter_id,
+        event_type,
+        since
+    )
+    .fetch_one(db)
+    .await?)
+}
+
 /// What `SubmitValues.update_submitter!` saves.
 #[derive(Clone, Debug)]
 pub struct SubmitterProgress {

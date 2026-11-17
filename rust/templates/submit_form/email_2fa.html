@@ -1,0 +1,73 @@
+{#- Port of app/views/submit_form/email_2fa.html.erb -#}
+{% extends "layouts/form.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="max-w-md mx-auto px-2 mt-12 mb-4">
+  <div class="space-y-6 mx-auto">
+    <div class="space-y-6">
+      <div class="flex items-center justify-center">
+        {% include "start_form/_banner.html" %}
+      </div>
+      <div class="flex items-center bg-base-200 rounded-xl p-4 mb-4">
+        <div class="flex items-center">
+          <div class="mr-3">
+            {{ svg_icon('writing_sign', class='w-10 h-10') }}
+          </div>
+          <div>
+            <p dir="auto" class="text-lg font-bold mb-1">{{ name }}</p>
+            {% if signed_text %}
+              <p dir="auto" class="text-sm">
+                {{ signed_text }}
+              </p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if masked_email %}
+      <div>
+        {{ t('the_sender_has_requested_a_two_factor_authentication_via_one_time_password_sent_to_your_email_html', email=masked_email) }}
+      </div>
+      {% if with_code_form %}
+        <form class="space-y-4" id="code_form" action="/submit_form_email_2fa" accept-charset="UTF-8" method="post"><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+          <div dir="auto" class="form-control !mt-0">
+            <input value="{{ slug }}" type="hidden" name="submitter_slug" id="submitter_slug" />
+            <input required="required" inputmode="numeric" class="base-input text-center" placeholder="XXXXXX" type="text" name="one_time_code" id="one_time_code" />
+            <div class="flex justify-between items-center mt-1">
+              <span>
+                {% if flash.alert %}
+                  <span class="text-red-500">
+                    {{ flash.alert }}
+                  </span>
+                {% endif %}
+                {% if flash.notice %}
+                  {{ flash.notice }}
+                {% endif %}
+              </span>
+              <span>
+                <button type="submit" form="resend_code_form" id="resend_label" class="link">{{ t('re_send_email') }}</button>
+              </span>
+            </div>
+          </div>
+          <toggle-submit dir="auto" class="form-control">
+            <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('submit'), disabled_with=t('submitting')) }}
+</button>
+          </toggle-submit>
+</form>        <form id="resend_code_form" class="hidden" method="post" action="/submit_form_email_2fa"><input type="hidden" name="_method" value="put" /><button type="submit">{{ t('re_send_email') }}</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="resend" value="true" /><input type="hidden" name="submitter_slug" value="{{ slug }}" /></form>
+      {% else %}
+        {% if tracking_param %}
+          <fetch-form data-onload="true">
+            <form class="button_to" method="post" action="/s/{{ slug }}/click_email"><button class="hidden" type="submit"></button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="t" value="{{ tracking_param }}" /></form>
+          </fetch-form>
+        {% endif %}
+        <toggle-submit dir="auto" class="form-control">
+          <form class="button_to" method="post" action="/submit_form_email_2fa"><input type="hidden" name="_method" value="put" /><button class="base-button w-full" type="submit">{{ buttons.button_title(title=t('send_verification_code'), disabled_with=t('submitting')) }}
+</button><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" /><input type="hidden" name="submitter_slug" value="{{ slug }}" /></form>
+        </toggle-submit>
+      {% endif %}
+    {% else %}
+      <div>{{ t('please_contact_the_requester_to_specify_your_email_for_two_factor_authentication') }}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

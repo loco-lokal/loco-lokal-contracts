@@ -1,0 +1,19 @@
+{#- Port of app/views/shared/_clipboard_copy.html.erb. Locals: `text`, `class`, `icon_class`,
+    `copy_title`, `copied_title` (translated). -#}
+<clipboard-copy data-text="{{ text }}" data-copied="{{ copied_title }}">
+  <label id="" class="{{ class }}">
+    <input type="radio" class="peer hidden">
+    <span class="peer-checked:hidden flex items-center space-x-2">
+      {{ svg_icon('link', class=icon_class) }}
+      <span class="hidden md:inline">
+        {{ copy_title }}
+      </span>
+    </span>
+    <span class="hidden peer-checked:flex items-center space-x-2">
+      {{ svg_icon('clipboard_copy', class=icon_class) }}
+      <span class="hidden md:inline">
+        {{ copied_title }}
+      </span>
+    </span>
+  </label>
+</clipboard-copy>
