@@ -286,6 +286,25 @@ pub async fn update_documents(
     Ok(())
 }
 
+/// `template.update!(schema:, fields:)` after an upload.
+pub async fn update_schema_and_fields(
+    db: impl PgExecutor<'_>,
+    id: i64,
+    schema: &JsonText,
+    fields: &JsonText,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        "UPDATE templates SET schema = $2, fields = $3, updated_at = (now() AT TIME ZONE 'utc')
+         WHERE id = $1",
+        id,
+        schema as _,
+        fields as _,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
 /// Copies the template accesses of one template to another (`Templates::Clone`).
 pub async fn copy_accesses(db: impl PgExecutor<'_>, from: i64, to: i64) -> Result<(), DbError> {
     sqlx::query!(

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE submitters SET\n             email = $2, name = $3, phone = $4, external_id = $5, values = $6, metadata = $7,\n             preferences = $8, sent_at = $9,\n             updated_at = CASE\n               WHEN (email, name, phone, external_id, values, metadata, preferences, sent_at)\n                    IS NOT DISTINCT FROM\n                    ($2::varchar, $3::varchar, $4::varchar, $5::varchar, $6::text, $7::text,\n                     $8::text, $9::timestamp)\n               THEN updated_at ELSE (now() AT TIME ZONE 'utc') END\n           WHERE id = $1\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
+  "query": "UPDATE submitters SET\n             email = $2, name = $3, phone = $4, external_id = $5, values = $6, metadata = $7,\n             preferences = $8, sent_at = $9, completed_at = $10,\n             updated_at = CASE\n               WHEN (email, name, phone, external_id, values, metadata, preferences, sent_at,\n                     completed_at)\n                    IS NOT DISTINCT FROM\n                    ($2::varchar, $3::varchar, $4::varchar, $5::varchar, $6::text, $7::text,\n                     $8::text, $9::timestamp, $10::timestamp)\n               THEN updated_at ELSE (now() AT TIME ZONE 'utc') END\n           WHERE id = $1\n           RETURNING id, submission_id, uuid, email, slug, values AS \"values: JsonText\", ua, ip,\n                     sent_at, opened_at, completed_at, created_at, updated_at, name, phone,\n                     external_id, preferences AS \"preferences: JsonText\",\n                     metadata AS \"metadata: JsonText\", account_id, declined_at, timezone,\n                     template_id",
   "describe": {
     "columns": [
       {
@@ -256,6 +256,7 @@
         "Text",
         "Text",
         "Text",
+        "Timestamp",
         "Timestamp"
       ]
     },
@@ -284,5 +285,5 @@
       true
     ]
   },
-  "hash": "4664e373c13d46a291823456208dbd509b770fc7f9201556e85a1e4aab4e0f97"
+  "hash": "4c7e4a52d697c027b4cf447cddf2f48a791a4e07a96aeb7d6f4ea61ab3781641"
 }

@@ -40,19 +40,19 @@
         {% if 'name' in link_form_fields %}
           <div dir="auto" class="form-control !mt-0">
             <label class="label" for="submitter_name">{{ t('name') }}</label>
-            <input {% if name_value is not none %}value="{{ name_value }}" {% endif %}required="required" class="base-input" placeholder="{{ t('provide_your_name' if multiple_fields else 'provide_your_name_to_start') }}" type="text" name="submitter[name]" id="submitter_name" />
+            {% if name_error_html %}{{ name_error_html|safe }}{% else %}<input {% if name_value is not none %}value="{{ name_value }}" {% endif %}required="required" class="base-input" placeholder="{{ t('provide_your_name' if multiple_fields else 'provide_your_name_to_start') }}" type="text" name="submitter[name]" id="submitter_name" />{% endif %}
           </div>
         {% endif %}
         {% if 'email' in link_form_fields %}
           <div dir="auto" class="form-control !mt-0">
             <label class="label" for="submitter_email">{{ t('email') }}</label>
-            <input {% if email_value is not none %}value="{{ email_value }}" {% endif %}required="required" class="base-input" placeholder="{{ t('provide_your_email' if multiple_fields else 'provide_your_email_to_start') }}" type="email" name="submitter[email]" id="submitter_email" />
+            {% if email_error_html %}{{ email_error_html|safe }}{% else %}<input {% if email_value is not none %}value="{{ email_value }}" {% endif %}required="required" class="base-input" placeholder="{{ t('provide_your_email' if multiple_fields else 'provide_your_email_to_start') }}" type="email" name="submitter[email]" id="submitter_email" />{% endif %}
           </div>
         {% endif %}
         {% if 'phone' in link_form_fields %}
           <div dir="auto" class="form-control !mt-0">
             <label class="label" for="submitter_phone">{{ t('phone') }}</label>
-            <input {% if phone_value is not none %}value="{{ phone_value }}" {% endif %}pattern="^\+[0-9\s\-]+$" required="required" title="{{ t('use_international_format_1xxx_') }}" class="base-input w-full" placeholder="{{ t('provide_your_phone_in_international_format' if multiple_fields else 'provide_your_phone_in_international_format_to_start') }}" type="tel" name="submitter[phone]" id="submitter_phone" />
+            {% if phone_error_html %}{{ phone_error_html|safe }}{% else %}<input {% if phone_value is not none %}value="{{ phone_value }}" {% endif %}pattern="^\+[0-9\s\-]+$" required="required" title="{{ t('use_international_format_1xxx_') }}" class="base-input w-full" placeholder="{{ t('provide_your_phone_in_international_format' if multiple_fields else 'provide_your_phone_in_international_format_to_start') }}" type="tel" name="submitter[phone]" id="submitter_phone" />{% endif %}
           </div>
         {% endif %}
         <toggle-submit dir="auto" class="form-control">

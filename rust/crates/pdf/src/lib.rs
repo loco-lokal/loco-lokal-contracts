@@ -1,9 +1,15 @@
 //! PDF rendering, modification, and signing. Replaces `lib/pdfium.rb`, `lib/pdf_utils.rb`,
 //! and the `HexaPDF` usage in `lib/submissions/`.
 
+pub mod cms;
 pub mod edit;
+pub mod image_page;
 pub mod jpeg;
 pub mod pages;
+pub mod signatures;
+pub mod text;
+pub mod text_image;
+pub mod upload;
 
 use std::path::{Path, PathBuf};
 

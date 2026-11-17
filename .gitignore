@@ -43,3 +43,4 @@ dump.rdb
 /rust/target
 /rust/tmp
 /rust/vendor
+/rust/scripts/parity/__pycache__

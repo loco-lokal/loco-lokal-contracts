@@ -2,7 +2,7 @@
 //! (`/resubmit_form`), `Submitters::StartForm` and `Submissions::AssignDefinedSubmitters`.
 //!
 //! Email two-factor verification (`shared_link_2fa`, reopening a pending submitter without
-//! the start form cookie) answers 422: sending and checking codes is not ported yet.
+//! the start form cookie) sends and checks codes with `email_2fa`.
 
 use axum::{
     extract::{Path, State},
@@ -19,7 +19,11 @@ use loco_db::{
 use loco_domain::ability::Action;
 use serde_json::{Map, Value, json};
 
-use super::{actions::redirect_to, pages::form_locale};
+use super::{
+    actions::redirect_to,
+    email_2fa::{self, LinkOtp, UnableToSendCode},
+    pages::form_locale,
+};
 use crate::{
     api::{Params, create::email::normalize_email, templates::blank},
     auth::{Auth, MaybeAuth},
@@ -145,22 +149,27 @@ impl Contact {
         let mut pairs = Vec::new();
         for key in ["email", "name", "phone"] {
             if let Some(value) = self.present(key) {
-                pairs.push(format!(
-                    "{key}={}",
-                    percent_encoding::utf8_percent_encode(value, QUERY)
-                ));
+                pairs.push(format!("{key}={}", cgi_escape(value)));
             }
         }
         pairs.join("&")
     }
 }
 
-/// `CGI.escape`.
+/// What `CGI.escape` keeps.
 const QUERY: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b'*')
     .remove(b'-')
     .remove(b'.')
-    .remove(b'_');
+    .remove(b'_')
+    .remove(b' ');
+
+/// `CGI.escape`: spaces become `+`.
+pub(super) fn cgi_escape(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, QUERY)
+        .to_string()
+        .replace(' ', "+")
+}
 
 struct Loaded {
     template: Template,
@@ -177,7 +186,7 @@ async fn load_template(state: &AppState, slug: &str) -> Result<Loaded, AppError>
     Ok(Loaded { template, account })
 }
 
-async fn can_read(
+pub(super) async fn can_read(
     state: &AppState,
     auth: Option<&Auth>,
     template: &Template,
@@ -210,6 +219,67 @@ struct FormState<'a> {
     contact: Contact,
     error_message: Option<String>,
     resubmit_slug: Option<&'a str>,
+    /// Fields with a `:blank` error.
+    blank_fields: Vec<String>,
+}
+
+/// `errors.messages.blank` of rails-i18n in the available locales (`%{attribute}` is the
+/// attribute's human name).
+fn blank_message(locale: &str) -> &'static str {
+    match locale {
+        "es-ES" | "es" => "no puede estar en blanco",
+        "fr-FR" | "fr" => "doit être rempli(e)",
+        "pt-PT" | "pt" => "não pode estar em branco",
+        "de-DE" | "de" => "muss ausgefüllt werden",
+        "it-IT" | "it" => "non può essere lasciato in bianco",
+        "nl-NL" | "nl" => "moet opgegeven zijn",
+        "pl" => "nie może być puste",
+        "uk" => "не може бути пустим",
+        "cs" => "je povinná položka",
+        "he" => "לא יכול להיות ריק",
+        "ar" => "لا يمكن أن يكون محتوى %{attribute} فارغاً",
+        "ko" => "내용을 입력해 주세요",
+        "ja" => "を入力してください",
+        _ => "can't be blank",
+    }
+}
+
+/// An attribute value as Nokogiri's HTML serializer writes it.
+fn nokogiri_attr(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
+            '\t' => out.push_str("&#9;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `field_error_proc` for an input with a `:blank` error: the tag re-serialized by
+/// Nokogiri with the `input-error` class, followed by `shared/_field_error`.
+fn error_input(attributes: &[(&str, Option<String>)], message: &str) -> String {
+    let mut html = String::from("<input");
+    for (name, value) in attributes {
+        if let Some(value) = value {
+            html.push(' ');
+            html.push_str(name);
+            html.push_str("=\"");
+            html.push_str(&nokogiri_attr(value));
+            html.push('"');
+        }
+    }
+    html.push('>');
+    html.push_str("<span class=\"label-text-alt text-red-400 mt-1\">\n  ");
+    html.push_str(&loco_views::escape_html(message));
+    html.push_str("\n</span>\n");
+    html
 }
 
 /// Renders `start_form/show`.
@@ -236,6 +306,85 @@ async fn render_show(
         .or_else(|| param("email"))
         .or_else(|| form.contact.email.clone());
     let phone_value = param("phone").or_else(|| form.contact.phone.clone());
+    let multiple_fields = fields.len() > 1;
+    let placeholder = |single: &str, multiple: &str| {
+        state
+            .views
+            .t(locale, if multiple_fields { multiple } else { single }, &[])
+    };
+    let error = |key: &str, attribute: &str| {
+        form.blank_fields.iter().any(|f| f == key).then(|| {
+            format!(
+                "{attribute} {}",
+                blank_message(locale).replace("%{attribute}", attribute)
+            )
+        })
+    };
+    let name_error = error("name", "Name").map(|message| {
+        error_input(
+            &[
+                ("value", name_value.clone()),
+                ("required", Some("required".into())),
+                ("class", Some("base-input input-error".into())),
+                (
+                    "placeholder",
+                    Some(placeholder(
+                        "provide_your_name_to_start",
+                        "provide_your_name",
+                    )),
+                ),
+                ("type", Some("text".into())),
+                ("name", Some("submitter[name]".into())),
+                ("id", Some("submitter_name".into())),
+            ],
+            &message,
+        )
+    });
+    let email_error = error("email", "Email").map(|message| {
+        error_input(
+            &[
+                ("value", email_value.clone()),
+                ("required", Some("required".into())),
+                ("class", Some("base-input input-error".into())),
+                (
+                    "placeholder",
+                    Some(placeholder(
+                        "provide_your_email_to_start",
+                        "provide_your_email",
+                    )),
+                ),
+                ("type", Some("email".into())),
+                ("name", Some("submitter[email]".into())),
+                ("id", Some("submitter_email".into())),
+            ],
+            &message,
+        )
+    });
+    let phone_error = error("phone", "Phone").map(|message| {
+        error_input(
+            &[
+                ("value", phone_value.clone()),
+                ("pattern", Some(r"^\+[0-9\s\-]+$".into())),
+                ("required", Some("required".into())),
+                (
+                    "title",
+                    Some(state.views.t(locale, "use_international_format_1xxx_", &[])),
+                ),
+                ("class", Some("base-input w-full input-error".into())),
+                (
+                    "placeholder",
+                    Some(placeholder(
+                        "provide_your_phone_in_international_format_to_start",
+                        "provide_your_phone_in_international_format",
+                    )),
+                ),
+                ("type", Some("tel".into())),
+                ("name", Some("submitter[phone]".into())),
+                ("id", Some("submitter_phone".into())),
+            ],
+            &message,
+        )
+    });
     let policy_links_html = signing::account_configs(&state.db, account.id, &[POLICY_LINKS_KEY])
         .await?
         .into_iter()
@@ -265,13 +414,204 @@ async fn render_show(
             "resubmit_slug": form.resubmit_slug,
             "error_message": form.error_message,
             "link_form_fields": fields,
-            "multiple_fields": fields.len() > 1,
+            "multiple_fields": multiple_fields,
             "name_value": name_value,
             "email_value": email_value,
             "phone_value": phone_value,
+            "name_error_html": name_error,
+            "email_error_html": email_error,
+            "phone_error_html": phone_error,
             "policy_links_html": policy_links_html,
         }))
         .render("start_form/show.html")
+}
+
+/// Renders `start_form/email_verification`. `resubmit_slug` is the resubmitted party's.
+fn render_email_verification(
+    state: &AppState,
+    session: &Session,
+    locale: &str,
+    loaded: &Loaded,
+    params: &Params,
+    resubmit_slug: Option<&str>,
+) -> Result<Response, AppError> {
+    let Loaded { template, account } = loaded;
+    // `params[key] || params.dig(:submitter, key)`
+    let param = |key: &str| {
+        params
+            .get(key)
+            .filter(|v| !v.is_null())
+            .or_else(|| params.get("submitter").and_then(|s| s.get(key)))
+            .filter(|v| !v.is_null())
+            .map(crate::api::create::values::ruby_to_s)
+    };
+    let resend_submitter: Vec<(&str, Option<String>)> = ["email", "name", "phone"]
+        .into_iter()
+        .map(|key| (key, param(key)))
+        .collect();
+    Page::new(state, session, locale)
+        .with(json!({
+            "robots_noindex": true,
+            "html_title": format!("{} | Loco Lokal", template.name),
+            "html_description": state.views.t(
+                &account.locale,
+                "account_name_has_invited_you_to_fill_and_sign_documents_online_effortlessly_with_a_secure_fast_and_user_friendly_digital_document_signing_solution",
+                &[("account_name", account.name.clone())],
+            ),
+            "template_name": template.name,
+            "template_slug": template.slug,
+            "account_name": account.name,
+            "form_action": if resubmit_slug.is_some() {
+                "/resubmit_form".to_owned()
+            } else {
+                format!("/d/{}", template.slug)
+            },
+            "resubmit": params.get("resubmit").filter(|v| !v.is_null()).map(crate::api::create::values::ruby_to_s),
+            "resubmit_slug": resubmit_slug,
+            "name_value": param("name"),
+            "email_value": param("email"),
+            "phone_value": param("phone"),
+            "resend_submitter": resend_submitter,
+        }))
+        .render("start_form/email_verification.html")
+}
+
+/// A share link submitter that `save` would write.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one short-lived value per request"
+)]
+enum Pending {
+    Existing(Submitter),
+    New {
+        party: NewParty,
+        source: &'static str,
+    },
+}
+
+impl Pending {
+    fn email(&self) -> Option<&str> {
+        match self {
+            Self::Existing(s) => s.email.as_deref(),
+            Self::New { party, .. } => party.email.as_deref(),
+        }
+    }
+
+    fn slug(&self) -> Option<&str> {
+        match self {
+            Self::Existing(s) => Some(&s.slug),
+            Self::New { .. } => None,
+        }
+    }
+
+    /// `save` (with `enqueue_new_submitter_jobs` for a new submitter).
+    async fn save(
+        self,
+        state: &AppState,
+        template: &Template,
+        ip: Option<&str>,
+        ua: Option<&str>,
+    ) -> Result<Submitter, AppError> {
+        match self {
+            Self::Existing(submitter) => {
+                signing::set_submitter_request(&state.db, submitter.id, ip, ua).await?;
+                Ok(submitter)
+            }
+            Self::New { party, source } => {
+                create_submission(state, template, party, source, ip, ua).await
+            }
+        }
+    }
+}
+
+/// Where `handle_require_2fa` goes when no code was sent or it failed.
+enum Retry {
+    /// `StartFormController`: back to `?email_verification` with an alert.
+    Redirect(Value),
+    /// `StartFormResubmitController`: the verification page with `flash.now`.
+    Render(String),
+}
+
+/// `handle_require_2fa` with `Submitters::StartForm.verify_2fa_and_save_submitter`.
+#[allow(clippy::too_many_arguments)]
+async fn handle_require_2fa(
+    state: &AppState,
+    session: &Session,
+    headers: &HeaderMap,
+    auth: Option<&Auth>,
+    locale: &str,
+    loaded: &Loaded,
+    params: &Params,
+    pending: Pending,
+    retry: Retry,
+    (ip, ua): (Option<&str>, Option<&str>),
+) -> Result<Response, AppError> {
+    let template = &loaded.template;
+    let Some(email) = pending.email().map(str::to_owned) else {
+        return unsupported(
+            state,
+            session,
+            locale,
+            template,
+            "Email two-factor verification without an email is not supported yet",
+        );
+    };
+    let resubmit_slug = match &retry {
+        Retry::Render(slug) => Some(slug.as_str()),
+        Retry::Redirect(_) => None,
+    };
+    let fail = |message: String| -> Result<Response, AppError> {
+        match &retry {
+            Retry::Redirect(submitter_params) => {
+                session.flash_alert(message);
+                Ok(redirect_to(
+                    state,
+                    headers,
+                    &email_2fa::verification_path(&template.slug, submitter_params),
+                ))
+            }
+            Retry::Render(_) => {
+                session.flash_now_alert(message);
+                render_email_verification(state, session, locale, loaded, params, resubmit_slug)
+            }
+        }
+    };
+    let verified =
+        match email_2fa::verify_link_otp(state, params.get("one_time_code"), &email, template)
+            .await?
+        {
+            LinkOtp::TooManyAttempts => {
+                return fail(state.views.t(locale, "too_many_attempts", &[]));
+            }
+            LinkOtp::Invalid => return fail(state.views.t(locale, "invalid_code", &[])),
+            LinkOtp::Blank => false,
+            LinkOtp::Verified => true,
+        };
+    let cookie = crate::cookies::encrypted(state, headers, EMAIL_2FA_COOKIE);
+    if !verified && (pending.slug().is_none() || cookie.as_deref() != pending.slug()) {
+        return match email_2fa::send_link_code(state, locale, template, &email, ip).await? {
+            Ok(()) => {
+                render_email_verification(state, session, locale, loaded, params, resubmit_slug)
+            }
+            Err(UnableToSendCode(message)) => fail(message),
+        };
+    }
+    let submitter = pending.save(state, template, ip, ua).await?;
+    let mut response = start_redirect(state, headers, &submitter.slug);
+    if verified {
+        email_2fa::track_email_verified(
+            state,
+            &submitter,
+            ip,
+            headers,
+            session,
+            auth.map(|a| a.true_user.id),
+            Map::new(),
+        )
+        .await?;
+        email_2fa::set_email_2fa_cookie(state, headers, &mut response, &submitter.slug);
+    }
+    Ok(response)
 }
 
 /// `GET /d/:slug`.
@@ -297,14 +637,11 @@ pub async fn show(
         return Err(not_found());
     }
     if template.shared_link {
-        if params.str("email_verification").is_some() {
-            return unsupported(
-                &state,
-                &session,
-                &locale,
-                template,
-                "Email two-factor verification is not supported yet",
-            );
+        if params
+            .get("email_verification")
+            .is_some_and(|v| !v.is_null())
+        {
+            return render_email_verification(&state, &session, &locale, &loaded, &params, None);
         }
         return render_show(
             &state,
@@ -399,6 +736,8 @@ struct NewParty {
     values: Map<String, Value>,
     preferences: Value,
     metadata: Value,
+    /// `(blob_id, uuid)` of attachments to copy to the submitter.
+    attachments: Vec<(i64, String)>,
 }
 
 /// `Submitters::StartForm.assign_submission_attributes` +
@@ -519,10 +858,25 @@ async fn create_submission(
             metadata: JsonText(party.metadata),
             preferences: JsonText(party.preferences),
             sent_at: None,
+            completed_at: None,
         },
     )
     .await?;
     signing::set_submitter_request(&mut *tx, submitter.id, ip, ua).await?;
+    for (blob_id, uuid) in &party.attachments {
+        loco_storage::Attachment::create_for_blob(
+            &mut *tx,
+            "Submitter",
+            submitter.id,
+            "attachments",
+            *blob_id,
+            uuid,
+        )
+        .await?;
+    }
+    if !party.attachments.is_empty() {
+        signing::touch_submitter(&mut *tx, submitter.id).await?;
+    }
     for (other_uuid, email) in others {
         submissions::insert_submitter(
             &mut *tx,
@@ -540,6 +894,7 @@ async fn create_submission(
                 metadata: JsonText(json!({})),
                 preferences: JsonText(json!({})),
                 sent_at: None,
+                completed_at: None,
             },
         )
         .await?;
@@ -649,14 +1004,32 @@ pub async fn update(
     };
     let contact = Contact::from_params(submitter_params);
     let fields = link_form_fields(template);
-    if fields.iter().any(|key| contact.present(key).is_none()) {
-        return unsupported(
+    // `find_or_initialize_submitter` with blank fields: a new submitter with an error on
+    // each of them, which `render :show` shows (`field_error_proc`).
+    let blank_fields: Vec<String> = fields
+        .iter()
+        .filter(|key| contact.present(key).is_none())
+        .cloned()
+        .collect();
+    if !blank_fields.is_empty() {
+        let error_message = (undefined_submitters(template_submitters(template)).len() > 1)
+            .then(|| multiple_submitters_error(&state, &locale, auth.as_ref(), template));
+        return render_show(
             &state,
             &session,
+            auth.as_ref(),
             &locale,
-            template,
-            "Starting without the requested details is not supported yet",
-        );
+            &loaded,
+            &params.0,
+            FormState {
+                contact,
+                error_message,
+                resubmit_slug: None,
+                blank_fields,
+            },
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+        .await;
     }
 
     // `Submitters::StartForm.find_or_initialize_submitter`
@@ -721,6 +1094,7 @@ pub async fn update(
                 },
                 error_message: Some(error),
                 resubmit_slug: None,
+                blank_fields: Vec::new(),
             },
             StatusCode::UNPROCESSABLE_ENTITY,
         )
@@ -743,27 +1117,8 @@ pub async fn update(
                         && a.user.account_id == s.account_id
                 })
         });
-    if require_2fa {
-        // `verify_2fa_and_save_submitter` without a code passes only with the cookie.
-        let verified = existing.as_ref().is_some_and(|s| {
-            crate::cookies::encrypted(&state, &headers, EMAIL_2FA_COOKIE).as_deref()
-                == Some(s.slug.as_str())
-        });
-        if !verified || params.str("one_time_code").is_some() {
-            return unsupported(
-                &state,
-                &session,
-                &locale,
-                template,
-                "Email two-factor verification is not supported yet",
-            );
-        }
-    }
-
-    let submitter = if let Some(submitter) = existing {
-        signing::set_submitter_request(&state.db, submitter.id, ip.as_deref(), ua.as_deref())
-            .await?;
-        submitter
+    let pending = if let Some(submitter) = existing {
+        Pending::Existing(submitter)
     } else {
         if has_dynamic_documents(template) {
             return unsupported(
@@ -779,23 +1134,37 @@ pub async fn update(
             .any(|k| k == "name")
             .then(|| contact.name.clone())
             .flatten();
-        create_submission(
-            &state,
-            template,
-            NewParty {
+        Pending::New {
+            party: NewParty {
                 email,
                 phone,
                 name,
                 values: Map::new(),
                 preferences: json!({ "send_email": true }),
                 metadata: json!({}),
+                attachments: Vec::new(),
             },
-            "link",
-            ip.as_deref(),
-            ua.as_deref(),
-        )
-        .await?
+            source: "link",
+        }
     };
+    if require_2fa {
+        return handle_require_2fa(
+            &state,
+            &session,
+            &headers,
+            auth.as_ref(),
+            &locale,
+            &loaded,
+            &params,
+            pending,
+            Retry::Redirect(submitter_params.clone()),
+            (ip.as_deref(), ua.as_deref()),
+        )
+        .await;
+    }
+    let submitter = pending
+        .save(&state, template, ip.as_deref(), ua.as_deref())
+        .await?;
     Ok(start_redirect(&state, &headers, &submitter.slug))
 }
 
@@ -988,29 +1357,18 @@ pub async fn resubmit(
                 contact: Contact::default(),
                 error_message: Some(error),
                 resubmit_slug: Some(&resubmitted.slug),
+                blank_fields: Vec::new(),
             },
             StatusCode::UNPROCESSABLE_ENTITY,
         )
         .await;
     }
-    if template.preferences.get("shared_link_2fa") == Some(&Value::Bool(true)) {
-        return unsupported(
-            &state,
-            &session,
-            &locale,
-            template,
-            "Email two-factor verification is not supported yet",
-        );
-    }
-
     let ua = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
-    let submitter = if let Some(submitter) = existing {
-        signing::set_submitter_request(&state.db, submitter.id, ip.as_deref(), ua.as_deref())
-            .await?;
-        submitter
+    let pending = if let Some(submitter) = existing {
+        Pending::Existing(submitter)
     } else {
         if has_dynamic_documents(template) {
             return unsupported(
@@ -1027,14 +1385,25 @@ pub async fn resubmit(
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
+        // `submitter.attachments << attachment.dup if submitter.values.value?(attachment.uuid)`:
+        // copies keep the uuid that the values refer to.
+        let mut attachments = Vec::new();
         if !values.is_empty() {
-            return unsupported(
-                &state,
-                &session,
-                &locale,
-                template,
-                "Resubmitting with default values is not supported yet",
-            );
+            for attachment in loco_storage::Attachment::for_record(
+                &state.db,
+                "Submitter",
+                resubmitted.id,
+                "attachments",
+            )
+            .await?
+            {
+                if values
+                    .values()
+                    .any(|v| v.as_str() == Some(attachment.uuid.as_str()))
+                {
+                    attachments.push((attachment.blob_id, attachment.uuid));
+                }
+            }
         }
         let preferences = if blank(prefs) {
             json!({ "send_email": true })
@@ -1051,18 +1420,120 @@ pub async fn resubmit(
         } else {
             "link"
         };
-        create_submission(
-            &state,
-            template,
-            NewParty {
+        Pending::New {
+            party: NewParty {
                 email: resubmitted.email.clone(),
                 phone: resubmitted.phone.clone(),
                 name: resubmitted.name.clone(),
                 values,
                 preferences,
                 metadata,
+                attachments,
             },
             source,
+        }
+    };
+    if template.preferences.get("shared_link_2fa") == Some(&Value::Bool(true)) {
+        return handle_require_2fa(
+            &state,
+            &session,
+            &headers,
+            auth.as_ref(),
+            &locale,
+            &loaded,
+            &params,
+            pending,
+            Retry::Render(resubmitted.slug.clone()),
+            (ip.as_deref(), ua.as_deref()),
+        )
+        .await;
+    }
+    let submitter = pending
+        .save(&state, template, ip.as_deref(), ua.as_deref())
+        .await?;
+    Ok(start_redirect(&state, &headers, &submitter.slug))
+}
+
+/// `PUT /start_form_self/:id` (`StartFormSelfController#update`): a signed-in user fills in
+/// the template as its first party, reopening their open `self` submission unless the
+/// template's fields changed since.
+pub async fn self_update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    required: Result<crate::auth::RequireAuth, Response>,
+    ClientIp(ip): ClientIp,
+    session: Session,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let auth = match required {
+        Ok(crate::auth::RequireAuth(auth)) => auth,
+        Err(response) => return Ok(response),
+    };
+    // `load_resource :template` (`Template.find(params[:id])`)
+    let template = match id.parse::<i64>() {
+        Ok(id) => templates::find(&state.db, id).await?,
+        Err(_) => None,
+    }
+    .ok_or_else(not_found)?;
+
+    // `authorize_start!`
+    if !can_read(&state, Some(&auth), &template).await? {
+        session.flash_alert("You are not authorized to access this page.");
+        return Ok(redirect_to(&state, &headers, "/"));
+    }
+    if template.archived_at.is_some() {
+        return Ok(redirect_to(
+            &state,
+            &headers,
+            &format!("/templates/{}", template.id),
+        ));
+    }
+
+    let ua = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let mut existing =
+        signing::find_self_start_form_submitter(&state.db, template.id, &auth.user.email).await?;
+    // `outdated_template_fields?`
+    if let Some(submitter) = &existing {
+        let submission = submissions::find(&state.db, submitter.submission_id).await?;
+        if submission
+            .and_then(|s| s.template_fields)
+            .is_some_and(|fields| !blank(&fields) && fields != template.fields)
+        {
+            existing = None;
+        }
+    }
+
+    let submitter = if let Some(submitter) = existing {
+        signing::set_submitter_request(&state.db, submitter.id, ip.as_deref(), ua.as_deref())
+            .await?;
+        submitter
+    } else {
+        if has_dynamic_documents(&template) {
+            let locale = form_locale(&state, Some(&auth), None, &headers);
+            return unsupported(
+                &state,
+                &session,
+                &locale,
+                &template,
+                "Templates with dynamic documents are not supported yet",
+            );
+        }
+        create_submission(
+            &state,
+            &template,
+            NewParty {
+                email: Some(auth.user.email.clone()),
+                phone: None,
+                name: Some(auth.user.full_name()),
+                values: Map::new(),
+                preferences: json!({ "send_email": true }),
+                metadata: json!({}),
+                attachments: Vec::new(),
+            },
+            "self",
             ip.as_deref(),
             ua.as_deref(),
         )

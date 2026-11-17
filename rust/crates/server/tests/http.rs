@@ -23,6 +23,8 @@ fn test_config(secret_key_base: &str) -> Config {
         production: false,
         job_concurrency: 0,
         force_ssl: false,
+        pdf_format: String::new(),
+        certs: serde_json::Map::new(),
     }
 }
 
@@ -105,10 +107,22 @@ async fn not_found_renders_rails_error_page_or_json(db: PgPool) {
         .unwrap()
     );
 
-    let (status, content_type, body) = get(&app, "/api/nothing", None).await;
+    // Unrouted, `ErrorsController` answers in the request's format: HTML without an
+    // `Accept` header, even under `/api`, and JSON for `*/*`.
+    let (status, content_type, _) = get(&app, "/api/nothing", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(content_type.starts_with("text/html"));
+    let (status, content_type, body) = get(&app, "/api/nothing", Some("*/*")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(content_type, "application/json");
     assert_eq!(body, r#"{"status":404}"#);
+    // Rails has no 405s.
+    let response = app
+        .clone()
+        .oneshot(Request::put("/api/templates").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     let (_, content_type, _) = get(&app, "/nothing", Some("application/json")).await;
     assert_eq!(content_type, "application/json");
@@ -155,4 +169,23 @@ async fn loads_rails_encrypted_smtp_settings(db: PgPool) {
         from,
         &loco_mailer::SenderOverride::Fixed("\"Loco Lokal\" <contracts@example.test>".into())
     );
+}
+
+/// The submission preview and the phone signature page answer 404 for unknown slugs, as
+/// `find_by!` does in Rails.
+#[sqlx::test(
+    migrations = false,
+    fixtures(path = "../../../schema", scripts("baseline"))
+)]
+async fn preview_pages_of_unknown_slugs_are_not_found(db: PgPool) {
+    let app = app(db).await;
+    for uri in [
+        "/e/nope",
+        "/e/nope?sig=bogus",
+        "/e/nope/completed",
+        "/e/nope/download",
+        "/p/nope?f=abc",
+    ] {
+        assert_eq!(get(&app, uri, None).await.0, StatusCode::NOT_FOUND, "{uri}");
+    }
 }

@@ -9,6 +9,7 @@ pub mod submissions;
 pub mod submitters;
 pub mod templates;
 pub mod time;
+pub mod tools;
 
 use axum::{
     Router,
@@ -35,6 +36,8 @@ pub const MAX_LIMIT: i64 = 100;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/user", get(user))
+        .route("/api/tools/merge", post(tools::merge))
+        .route("/api/tools/verify", post(tools::verify))
         .route("/api/templates", get(templates::index))
         .route(
             "/api/templates/{id}",
@@ -94,6 +97,74 @@ pub fn render(status: StatusCode, value: &Value) -> Response {
 #[must_use]
 pub fn rails_json(value: &Value) -> String {
     loco_rails_compat::json::generate(value)
+}
+
+/// Active Support's escaping of serialized JSON (see [`render`]), for [`render_ruby_floats`].
+fn escape_json_html(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '<' => escaped.push_str("\\u003c"),
+            '>' => escaped.push_str("\\u003e"),
+            '&' => escaped.push_str("\\u0026"),
+            '\u{2028}' => escaped.push_str("\\u2028"),
+            '\u{2029}' => escaped.push_str("\\u2029"),
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// `JSON.generate(value)`: like `Value::to_string`, with floats as Ruby writes them
+/// (`12.0`, `1.0e-05`).
+#[must_use]
+pub fn ruby_json(value: &Value) -> String {
+    fn write(value: &Value, out: &mut String) {
+        match value {
+            Value::Number(n) if n.is_f64() => {
+                out.push_str(&crate::signing::pages::ruby_float(
+                    n.as_f64().unwrap_or_default(),
+                ));
+            }
+            Value::Array(items) => {
+                out.push('[');
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    write(item, out);
+                }
+                out.push(']');
+            }
+            Value::Object(map) => {
+                out.push('{');
+                for (i, (key, item)) in map.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&Value::String(key.clone()).to_string());
+                    out.push(':');
+                    write(item, out);
+                }
+                out.push('}');
+            }
+            other => out.push_str(&other.to_string()),
+        }
+    }
+    let mut out = String::new();
+    write(value, &mut out);
+    out
+}
+
+/// [`render`] with floats as Ruby writes them ([`ruby_json`]).
+#[must_use]
+pub fn render_ruby_floats(status: StatusCode, value: &Value) -> Response {
+    let mut response = (status, Body::from(escape_json_html(&ruby_json(value)))).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    response
 }
 
 #[must_use]

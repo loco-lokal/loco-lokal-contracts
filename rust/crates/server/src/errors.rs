@@ -15,6 +15,8 @@ use crate::state::AppState;
 #[derive(Debug)]
 pub enum AppError {
     Status(StatusCode),
+    /// A branch that is not ported yet: 422 with `{"error": "… is not supported yet"}`.
+    Unsupported(String),
     Internal(anyhow::Error),
 }
 
@@ -30,6 +32,7 @@ impl AppError {
     pub fn into_anyhow(self) -> anyhow::Error {
         match self {
             Self::Status(status) => anyhow::anyhow!("request failed with {status}"),
+            Self::Unsupported(message) => anyhow::anyhow!(message),
             Self::Internal(err) => err,
         }
     }
@@ -39,6 +42,10 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = match self {
             Self::Status(status) => status,
+            Self::Unsupported(message) => {
+                tracing::warn!(error = message, "request needs an unported branch");
+                return crate::api::unprocessable(message);
+            }
             Self::Internal(err) => {
                 tracing::error!(error = format!("{err:#}"), "request failed");
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -55,6 +62,11 @@ impl IntoResponse for AppError {
 #[derive(Clone, Copy)]
 pub struct ErrorPage;
 
+/// Marks the 404 of a request no route matched: Rails' `ErrorsController` picks its
+/// format from the request alone, without the API's JSON default.
+#[derive(Clone, Copy)]
+pub struct Unrouted;
+
 /// Middleware that replaces marked error responses with the HTML or JSON error body.
 pub async fn error_page_layer(
     State(state): State<AppState>,
@@ -62,13 +74,47 @@ pub async fn error_page_layer(
     next: axum::middleware::Next,
 ) -> Response {
     let wants_json = wants_json(request.uri().path(), request.headers());
+    let unrouted_json = unrouted_wants_json(request.uri().path(), request.headers());
     let response = next.run(request).await;
 
     if response.extensions().get::<ErrorPage>().is_none() {
         return response;
     }
 
-    render_error(&state, response.status(), wants_json)
+    let json = if response.extensions().get::<Unrouted>().is_some() {
+        unrouted_json
+    } else {
+        wants_json
+    };
+    render_error(&state, response.status(), json)
+}
+
+/// `request.format` for `respond_to { json; any }`: a `.json` path, else the `Accept`
+/// header unless it is missing or browser-like (`text/html, */*`), where `*/*` picks
+/// the first format, JSON.
+fn unrouted_wants_json(path: &str, headers: &HeaderMap) -> bool {
+    if std::path::Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+    {
+        return true;
+    }
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let browser_like = accept.split(',').count() > 1 && accept.contains("*/*");
+    if accept.trim().is_empty() || browser_like {
+        return false;
+    }
+    accept.split(',').map(str::trim).find_map(|media| {
+        let media = media.split(';').next().unwrap_or_default().trim();
+        match media {
+            "application/json" | "*/*" => Some(true),
+            "text/html" | "application/xhtml+xml" | "text/*" => Some(false),
+            _ => None,
+        }
+    }) == Some(true)
 }
 
 fn wants_json(path: &str, headers: &HeaderMap) -> bool {
@@ -104,7 +150,10 @@ fn render_error(state: &AppState, status: StatusCode, json: bool) -> Response {
     let page = match status.as_u16() {
         404 => "404",
         422 => "422",
-        _ => "500",
+        500 => "500",
+        // `ErrorsController` has no page for other statuses (such as 400 for
+        // `ActionController::ParameterMissing`), so Rails answers with its failsafe.
+        _ => return failsafe(),
     };
     let path = state
         .config
@@ -116,4 +165,20 @@ fn render_error(state: &AppState, status: StatusCode, json: bool) -> Response {
         Ok(html) => (status, Html(html)).into_response(),
         Err(_) => status.into_response(),
     }
+}
+
+/// `ActionDispatch::ShowExceptions#render_exception` when the error page itself fails.
+fn failsafe() -> Response {
+    let mut response = (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "500 Internal Server Error\nIf you are the administrator of this website, then please \
+         read this web application's log file and/or the web server's log file to find out \
+         what went wrong.",
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
 }

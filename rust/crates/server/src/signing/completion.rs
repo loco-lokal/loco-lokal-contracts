@@ -1,6 +1,7 @@
 //! `ProcessSubmitterCompletionJob`: after a submitter completes the form, record the
 //! completion, generate the result documents (`signing::results`), and once the last
-//! party has completed, the audit trail (`signing::audit`) and the completed emails
+//! party has completed, the combined document (`signing::combined`, when the account
+//! combines results), the audit trail (`signing::audit`) and the completed emails
 //! (`signing::emails`). Then invite the next parties of an ordered submission and send
 //! the `form.completed` and `submission.completed` webhooks.
 
@@ -46,12 +47,22 @@ pub async fn enqueue(
     submitter_id: i64,
     is_last: Option<bool>,
 ) -> anyhow::Result<()> {
+    enqueue_with(state, submitter_id, is_last, None).await
+}
+
+/// [`enqueue`] with `send_invitation_email`.
+pub async fn enqueue_with(
+    state: &AppState,
+    submitter_id: i64,
+    is_last: Option<bool>,
+    send_invitation_email: Option<bool>,
+) -> anyhow::Result<()> {
     loco_jobs::enqueue(
         &state.db,
         &ProcessSubmitterCompletion {
             submitter_id,
             is_last,
-            send_invitation_email: None,
+            send_invitation_email,
         },
         EnqueueOptions::default(),
     )
@@ -87,7 +98,9 @@ async fn process(state: &AppState, job: &ProcessSubmitterCompletion) -> Result<(
     super::results::ensure_result_generated(state, &form.submitter).await?;
 
     if is_last {
-        super::audit::check_combined(state, form.submission.account_id).await?;
+        if super::combined::enabled(state, form.submission.account_id).await? {
+            super::combined::ensure_combined_generated(state, &form.submitter).await?;
+        }
         super::audit::ensure_audit_generated(state, form.submission.id).await?;
         super::emails::enqueue_completed_emails(state, &form).await?;
     }

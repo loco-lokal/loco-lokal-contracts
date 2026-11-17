@@ -74,6 +74,7 @@ The server reads the same variables as Rails:
 - Storage: `S3_ATTACHMENTS_BUCKET`/`AWS_*`/`S3_ENDPOINT`, `GCS_*`, `AZURE_*`. Without any of these, files go to `$WORKDIR/attachments`; in production the stored storage settings apply instead.
 - Mail: `SMTP_*`, including `SMTP_FROM`. Without these, the stored SMTP settings apply; with neither, mail is discarded.
 - `RAILS_ENV=production`, which turns off template and asset-manifest reloading.
+- `PDF_FORMAT` (`pdf/a-3b` for PDF/A-3b result documents and audit trails) and `CERTS` (signing certificates that replace the accounts' own).
 
 It also reads these, which Rails doesn't use:
 
@@ -112,15 +113,26 @@ cd rust/scripts/parity
 ./compare.py "$PARITY_TOKEN" GET /api/templates GET /api/submissions   # reads: method/path pairs, optional JSON body
 ./writes.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # template clone/update/archive, submission update/archive
 ./create.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # submission create modes and errors, submitter updates; compares stored rows
-./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs, audit trail
+./signing.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # signing form /s/:slug: pages, view, upload, submit, decline; stored rows, result PDFs (also of the two-image template, with right-to-left text, with stamps, and of two documents with interactive forms), audit trail
+./signing_configs.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # signed results and audit trails with timestamp servers and custom certificates
 ./emails.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"    # invitation, declined, next-party, completed, delegation and copy emails via Mailpit, email_events rows
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
-./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
+./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, missing details, completed page, resubmit; stored rows
+./form_extras.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # invite, metadata, remembered signatures, prefill_attachments, start_form_self; stored rows
+./tools.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"     # /api/tools/merge (rendered pages) and /api/tools/verify (exact responses)
+./combined.py                                        # combine_pdf_result_key, in its own account: combined PDF, rows, emails, downloads, API
+./preview.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # submission preview /e/:slug (signed out, sig, signed in), /e/:slug/completed, /e/:slug/download, /p/:slug
+./email_2fa.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # email one-time codes on /s/:slug and /d/:slug: pages, redirects, emails, otp_challenges and events
+./uploads.py "$PARITY_TOKEN"                         # template uploads and added documents: responses, stored rows, preview PNGs
 ./previews.py                                        # /preview/:signed_key/:page, /templates/:id/preview, documents_page_objects (seeds its own template)
 ```
 
+`uploads.py` signs in on both servers as a user that `uploads_seed.rb` creates with a known password, and uploads PDFs (form fields, links, 18 pages, a password) and images that the seed builds with HexaPDF and libvips. It needs Pillow, and reads the stored previews through the `rails` service.
+
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
+
+`signing_configs.py` stores each signing setting through the `rails` service and restores it afterwards. Its timestamp server (`openssl ts -reply`) listens on `TSA_HOST:TSA_PORT` (default `HOOK_HOST` or 127.0.0.1, port 4598), which both servers must reach. To check PDF/A output, start both servers with `PDF_FORMAT=pdf/a-3b` and run `signing.py` again; it compares the XMP metadata and output intents of the result documents and audit trails.
 
 ## Status
 
@@ -152,7 +164,7 @@ Phase 4c adds the audit trail and the completed emails:
 - `loco_pdf::edit::compose` is the part of HexaPDF's composer the audit trail uses: frames with floats, text and image boxes, rules, column and table boxes that split across pages.
 - `signing/emails.rs` sends `SubmitterMailer#completed_email` to the sender and the BCC addresses, and `#documents_copy_email` to the parties, with the result documents, the audit trail and uploaded files attached (up to 10 MB, `document_filename_format` applied).
 
-`signing.py` compares the audit trails word by word (positions to 0.01 pt; ids, checksums and addresses may differ in text only), as rendered pages, by metadata and by signature. Saved documents carry HexaPDF's `Producer` and its zone-less UTC dates, as the Rails documents do.
+`signing.py` compares the audit trails word by word (positions to 0.01 pt; ids, checksums and addresses may differ in text only), as rendered pages (with those words blanked), by metadata and by signature. It compares the words, metadata and signatures of the result PDFs too. Saved documents carry HexaPDF's `Producer` and its zone-less UTC dates, as the Rails documents do.
 
 The rest of Phase 4 adds the links around the signing form:
 
@@ -163,7 +175,64 @@ The rest of Phase 4 adds the links around the signing form:
 - `loco_rails_compat::cookies` reads and writes Rails' `cookies.encrypted` values, so the `start_form_slug` and `email_2fa_slug` cookies work across both servers. Like Rails, the Rust server does not write these secure cookies on plain-http requests in production.
 - Devise's sign-in redirect is now an absolute URL, as in Rails.
 
-`downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
+- `signing/preview.rs`: the submission preview `/e/:slug` (the target of documents copy links and `{{documents.link}}`), signed out, with the `sig` link, and with the extra controls a signed-in user of the account sees (edit, send email/SMS, sign in person, resubmit, unarchive, the event log, revealing masked values); the 40 minute window and two-factor parties that redirect to `/e/:slug/completed`; the completed page with the copy-to-email form (`?status=error`, `email`); `/e/:slug/download`; and `/p/:slug`, the page a phone opens to draw a signature.
+
+`downloads.py`, `start_form.py` and `preview.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies. `preview.py` signs in on both servers as `parity-viewer@example.com`, a user that `seed.rb` creates (run `seed.sh` again on an existing database).
+
+Email two-factor verification (`signing/email_2fa.rs`, `otp.rs`):
+
+- The signing form with `require_email_2fa` renders `submit_form/email_2fa`. `PUT /submit_form_email_2fa` queues `SubmitterMailer#otp_verification_email` (and the `send_2fa_email` event), at most once per 15 seconds; `POST /submit_form_email_2fa` checks the code, records `email_verified` and sets the `email_2fa_slug` cookie.
+- The share link asks for a code with `shared_link_2fa`, and when a pending party is reopened without the `start_form_slug` cookie: `start_form/email_verification`, `TemplateMailer#otp_verification_email`, the resend button (`POST /start_form_email_2fa_send`) and `?email_verification`. Resubmitting (`/resubmit_form`) with `shared_link_2fa` asks for a code too.
+- `OtpChallenges`: the same HOTP codes, nonces and `otp_challenges` rows as Rails, so a code sent by one server verifies on the other. Codes are reused for 5 minutes and expire after 10; 20 failed attempts in 23 hours (100 overall) answer "too many attempts".
+- The `RateLimit` calls of these endpoints (two per 45 seconds, per process) apply as in Rails, which enables them outside multitenant mode too. The bounced-email checks and the `custom_otp_email` sender are multitenant-only and not ported, so `start_form/error` (shown for a bounced address) is never rendered.
+
+`email_2fa.py` covers these. It reads the codes from Mailpit and waits out the send limits between cases.
+
+Result documents and their signatures, continued (issue #5):
+
+- Two or more image documents are also merged into one more result PDF named after the submission, with the pages of the signed image PDFs (and so their signature fields) as HexaPDF imports them (`Editor::merge`).
+- `PDF_FORMAT=pdf/a-3b` makes results and audit trails PDF/A-3b (`loco_pdf::edit::pdfa`): HexaPDF's XMP metadata from the information dictionary, the sRGB output intent, and the rebuilt `hmtx` tables of the TrueType fonts in loaded documents (`fix_glyph_widths`). The audit trail's level 3u uses the same code.
+- Timestamp servers (`signing/timestamp.rs`, `Submissions::TimestampHandler`): each signature carries the server's RFC 3161 token, with the fallback after a comma and basic-auth credentials from the URL. A failed request embeds the current time instead, as in Rails.
+- Custom signing certificates: the PKCS#12 file selected as the default (with OpenSSL's choice of key and certificate), and the `CERTS` environment variable.
+- A later party's fonts and images no longer reuse the resource names of an earlier party's. That replaced the earlier text and signature images in multi-party results.
+- Interactive forms in the documents get their field appearances as `maybe_flatten_pdf` has HexaPDF create them (`loco_pdf::edit::appearances`), then are flattened: a forced pass with `NeedAppearances`, then the regular one of `flatten` (text fields without appearances, every combo and list box, check boxes and radio buttons without two state appearances). Single-line, comb and multiline text, list boxes, check marks and radio dots, borders, backgrounds, `MK /R` rotation and the `AFNumber_Format`/`AFPercent_Format` actions follow HexaPDF and DocuSeal's patches (no push button appearances).
+- Stamp fields (`signing/stamp.rs`, `Submitters::CreateStampAttachment`): completing a party adds its stamp image (`stamp.png`, reused by checksum) as the field's value. The logo and the half transparent white layer are composited as libvips does, and the text is laid out like `Vips::Image.text` (`loco_pdf::text_image`): Pango's runs, wrapping (hyphens inside words), line metrics and the autofit search, shaped with `harfrust` and hinted as fontconfig's `hintslight` has FreeType do. Its font is GoNoto Kurrent, which fontconfig picks for `sans` in the Docker image. The anti-aliasing differs slightly from FreeType's, so the PNG is close to Rails' but not identical: `signing.py` compares stamps with a tolerance and the rest of the result pages exactly.
+- Right-to-left text (`loco_domain::bidi`, `TextUtils.maybe_rtl_reverse`) in result documents and the audit trail: Arabic letters in their presentation forms (`ArabicLetterConnector`), then TwitterCldr's own Bidi algorithm with its quirks, and right alignment where Rails uses it. The bidi classes and the `RTL_REGEXP` code points come from Rails (`scripts/dump-bidi-classes.sh`, which also refreshes the test fixture of Rails' output for sample texts).
+
+Combined result documents (`combine_pdf_result_key`):
+
+- `signing/combined.rs` ports `Submissions::GenerateCombinedAttachment` and `EnsureCombinedGenerated`: the last party's documents as `generate_pdfs` fills them, in schema order, then the audit trail in the account's locale, in one PDF signed like the results and attached to the submission as `combined_document`. The completion job generates it before the audit trail, so `combined_document_url` is filled in the API and webhooks.
+- `loco_pdf::edit::Editor::import_pages` copies pages with what they reference into another document, as `HexaPDF::Importer` does.
+- Downloads (`Submitters.select_attachments_for_download` and `?combined=true` with `build_combined_url`, also on `/e/:slug/download`) and the completed and documents copy emails use the combined document; the emails then leave out the separate audit trail.
+- `GET`/`PUT /api/submissions/:id` and `GET /api/submissions` with `include=combined_document_url` generate missing combined documents.
+- Unported branches reached from a request (custom certificates, timestamp servers, `PDF_FORMAT=pdf/a-3b`, right-to-left text in the audit trail, …) answer 422 with their "not supported yet" message.
+
+`combined.py` covers these, in its own account so that the setting does not change what the other checks see.
+
+Issue #7 ports the remaining signing-form endpoints and API gaps:
+
+- `POST /s/:slug/invite`, `GET /s/:slug/metadata` (text runs from PDFium, cached in `document_metadata`), `POST /s/:slug/prefill_attachments` and `PUT /start_form_self/:id`.
+- The remember-signature cookie (`signature_uuids`, written on upload with `remember_signature=true`) and `signed_signature_uuids` on the form page (`Submitters::FindRememberedSignature`).
+- `completed` recipients in `POST /api/submissions` and `PUT /api/submitters/:id`, with default, formula and date values, invite-by-field, the `api_complete_form` event and the completion jobs.
+- Prefilled attachment fields: base64 data or `https` URLs (with `DownloadUtils`' checks) of PNG and JPEG images and PDF files; blobs are reused by checksum.
+- Share link starts without the requested details render the form with Rails' `field_error_proc` markup, and resubmitting copies the attachments the `default_values` refer to.
+- Email message bodies of 2 KB or more have their styles and base64 data stored as `email_message_assets`.
+- `POST /api/tools/merge` and `POST /api/tools/verify` (`loco_pdf::signatures` and `loco_pdf::cms`, a PKCS#7 reader that checks RSA signatures as `OpenSSL::PKCS7#verify` does).
+- HTML errors without an error page (the 400 of a missing parameter) answer Rails' plain-text failsafe 500.
+
+`create.py` covers the API changes, `start_form.py` the share link changes, and `form_extras.py` and `tools.py` the rest.
+
+Template uploads port `TemplatesUploadsController#create` (`POST /templates_upload`), `TemplateDocumentsController#create` (`POST /templates/:id/documents`), `Templates::CreateAttachments` and `Templates::ProcessDocument` (`templates/`, `loco_pdf::upload`):
+
+- PDFs and images (PNG, JPEG, ICO, BMP; other image types fail as in Rails). Password-protected PDFs get the password prompt and are stored decrypted.
+- Form fields extracted from the PDF (`Templates::FindPdfiumAcroFields`), and its `http(s)` links in `metadata.pdf.annotations` (`Templates::BuildPdfiumAnnotations`).
+- Blob and attachment rows with Rails' metadata, key order included. Uploaded files are identified by content, as Marcel does.
+- `preview_images`: up to 16 pages, with select placeholders hidden and form fields flattened, rendered 1400 px wide. They are written as libvips writes them: quantized by libimagequant 4.2.2 (the version in Rails' image) to a 2-, 4- or 8-bit palette, with the same `eXIf` and `pHYs` chunks. Images are turned upright and scaled to 1400 px.
+- The `template.created` webhook and the search entry. A failed upload keeps the template and documents created so far, as in Rails.
+- `Templates::BuildImagePagePdf` (`loco_pdf::image_page`), byte for byte. Nothing calls it yet; Rails uses it to edit documents in the template builder.
+- `POST /api/templates` does not exist in this edition: like Rails, the Rust server answers 404, and `{"message": "This feature is not available in this edition"}` for `/api/templates/pdf`, `…/docx` and the other enterprise paths. Unrouted methods now answer 404 instead of 405, and unrouted paths pick HTML or JSON from the `Accept` header, as `ErrorsController` does.
+
+Preview pages of PDFs come out pixel for pixel as in Rails, although the two `PDFium` builds differ. Rails' build reads checkbox and radio states through its own "raw" functions; the Rust server loads the page's form view instead, so the standard functions see them too. Previews of uploaded images differ slightly (mean difference below 0.3 of 255), because `image`'s filters replace libvips' resize, so their palettes can have a few more or fewer colors. The PNG compression differs as well, so preview byte sizes and checksums are not the same as Rails'.
 
 The document page endpoints around the template builder:
 
@@ -179,24 +248,22 @@ These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
   - dynamic documents;
-  - two or more image documents (Rails merges them into one PDF);
-  - custom signing certificates;
-  - timestamp servers;
-  - PDF/A output.
-- Right-to-left text is drawn in logical order, where Rails reorders it visually.
-- Form fields that need their appearances generated (`NeedAppearances`) are left unflattened.
-- Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet", as does right-to-left text in the audit trail and a timestamp server for its signature.
-- Email two-factor verification: sending and checking codes on the signing form and the share link (`shared_link_2fa`, reopening a pending party without the start form cookie, `?email_verification`) answers 422. A valid `email_2fa_slug` cookie or two-factor token is accepted.
-- Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission) answer 422.
-- The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
-- Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
+  - form field appearances where HexaPDF would fail and Rails would leave the form unflattened: text the field's font cannot encode, embedded TrueType or symbol fonts, CMYK text, `AFTime_Format`, combo boxes with several values, and list box values that are not options;
+  - signing with the `docuseal_aatl` certificate without `CERTS`, with a certificate without its private key, or with a non-RSA key.
+- Share link email two-factor verification for a party without an email (a `link_form_fields` without `email`) answers 422.
+- The signed-in download link of the dashboard (`/submissions/:id/download`), including its `?combined=true`.
+- The submission preview `/e/:slug` in the mobile app (`Hotwire Native` user agents) and for dynamic documents answers 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).
-- Stamp fields (422 on completion) and dynamic documents (422 on the page; Phase 5).
+- Dynamic documents (422 on the page; Phase 5).
 - `/templates/:id/preview` in the Hotwire Native apps (422).
-- The remember-signature cookie, and presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
-- Creating `completed` submitters and completing them through `PUT /api/submitters/:id`, and prefilling attachment fields.
+- Presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
+- Prefilling attachment fields with typed text (Rails renders it in a font) or with file types other than PNG, JPEG and PDF.
+- Stamp fields of a recipient that `POST /api/submissions` creates as `completed` answer 422.
+- `/api/tools/merge` with documents that have form fields; `/api/tools/verify` with RFC 3161 timestamp signatures, signatures without RSA keys, revisions after the last signature that end with `%%EOF` (`FPDF_HasOnlyDSSChanges`), and trusted certificates other than the generated ones (custom certificates, `CERTS`, `TRUSTED_CERTS`).
 - Expiration jobs (Phase 7).
 - Extracting email assets from message bodies of 2 KB or more.
+- Uploading Word documents (Rails converts them with the closed-source `WordCraft` gem), ZIP archives, and documents from a URL (`/templates_upload/new`, `params[:url]`) answer 422.
+- The template builder itself (`/templates/:id/edit`, where uploads redirect) and MCP's `create_template`.
 
 ## Layout
 
