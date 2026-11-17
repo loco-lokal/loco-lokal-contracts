@@ -365,7 +365,7 @@ fn glyph_name(c: char) -> Option<&'static str> {
 
 /// `FONT_PATH`'s directory: `FONTS_DIR`, `/fonts` (the Docker image), or `rust/vendor/fonts`
 /// (`rust/scripts/fetch-fonts.sh`).
-fn fonts_dir() -> PathBuf {
+pub(crate) fn fonts_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("FONTS_DIR") {
         return PathBuf::from(dir);
     }
