@@ -117,6 +117,7 @@ cd rust/scripts/parity
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
 ./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
+./email_2fa.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # email one-time codes on /s/:slug and /d/:slug: pages, redirects, emails, otp_challenges and events
 ```
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
@@ -164,6 +165,15 @@ The rest of Phase 4 adds the links around the signing form:
 
 `downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
 
+Email two-factor verification (`signing/email_2fa.rs`, `otp.rs`):
+
+- The signing form with `require_email_2fa` renders `submit_form/email_2fa`. `PUT /submit_form_email_2fa` queues `SubmitterMailer#otp_verification_email` (and the `send_2fa_email` event), at most once per 15 seconds; `POST /submit_form_email_2fa` checks the code, records `email_verified` and sets the `email_2fa_slug` cookie.
+- The share link asks for a code with `shared_link_2fa`, and when a pending party is reopened without the `start_form_slug` cookie: `start_form/email_verification`, `TemplateMailer#otp_verification_email`, the resend button (`POST /start_form_email_2fa_send`) and `?email_verification`. Resubmitting (`/resubmit_form`) with `shared_link_2fa` asks for a code too.
+- `OtpChallenges`: the same HOTP codes, nonces and `otp_challenges` rows as Rails, so a code sent by one server verifies on the other. Codes are reused for 5 minutes and expire after 10; 20 failed attempts in 23 hours (100 overall) answer "too many attempts".
+- The `RateLimit` calls of these endpoints (two per 45 seconds, per process) apply as in Rails, which enables them outside multitenant mode too. The bounced-email checks and the `custom_otp_email` sender are multitenant-only and not ported, so `start_form/error` (shown for a bounced address) is never rendered.
+
+`email_2fa.py` covers these. It reads the codes from Mailpit and waits out the send limits between cases.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -175,7 +185,7 @@ These parts return 422 ("not supported yet") or are still missing:
 - Right-to-left text is drawn in logical order, where Rails reorders it visually.
 - Form fields that need their appearances generated (`NeedAppearances`) are left unflattened.
 - Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet", as does right-to-left text in the audit trail and a timestamp server for its signature.
-- Email two-factor verification: sending and checking codes on the signing form and the share link (`shared_link_2fa`, reopening a pending party without the start form cookie, `?email_verification`) answers 422. A valid `email_2fa_slug` cookie or two-factor token is accepted.
+- Share link email two-factor verification for a party without an email (a `link_form_fields` without `email`) answers 422.
 - Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission) answer 422.
 - The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
 - Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.

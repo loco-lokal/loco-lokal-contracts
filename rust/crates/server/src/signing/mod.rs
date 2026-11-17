@@ -7,6 +7,7 @@ pub mod actions;
 pub mod audit;
 pub mod completion;
 pub mod downloads;
+pub mod email_2fa;
 pub mod emails;
 pub mod pages;
 pub mod results;
@@ -57,6 +58,13 @@ pub fn router() -> Router<AppState> {
         )
         .route("/d/{slug}/completed", get(start_form::completed))
         .route("/send_submission_email", post(send_email::create))
+        .route(
+            "/submit_form_email_2fa",
+            post(email_2fa::verify)
+                .put(email_2fa::send)
+                .patch(email_2fa::send),
+        )
+        .route("/start_form_email_2fa_send", post(email_2fa::send_link))
         .route(
             "/resubmit_form",
             axum::routing::put(start_form::resubmit).patch(start_form::resubmit),
@@ -413,6 +421,12 @@ impl Access<'_> {
     pub fn pass_link_2fa(&self, form: &Form) -> bool {
         if form.submission.source != "link"
             || form.template_preference("shared_link_2fa") != Some(&Value::Bool(true))
+        {
+            return true;
+        }
+        if crate::cookies::encrypted(self.state, self.headers, start_form::EMAIL_2FA_COOKIE)
+            .as_deref()
+            == Some(form.submitter.slug.as_str())
         {
             return true;
         }
