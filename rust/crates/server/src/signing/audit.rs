@@ -28,7 +28,7 @@ use super::{
         FONT_BOLD_NAME, FONT_NAME, PDF_A_3B, SIGN_REASON, Signer, TESTING_FOOTER,
         UNSUPPORTED_IMAGE_TYPES, Uploads, WITH_FILE_LINKS_KEY, WITH_SIGNATURE_ID,
         WITH_SUBMITTER_TIMEZONE_KEY, WITH_TIMESTAMP_SECONDS_KEY, default_font, is_rtl,
-        load_signing_key, ruby_to_s, save_document, unsupported, wrap,
+        load_signing_key, maybe_rtl_reverse, ruby_to_s, save_document, unsupported, wrap,
     },
     timestamp::TimestampHandler,
 };
@@ -192,13 +192,13 @@ impl Configs {
     }
 }
 
-/// `TextUtils.maybe_rtl_reverse`: right-to-left text needs a Bidi reordering that is not
-/// ported, so it fails the job instead of drawing differently.
-fn ltr(text: &str) -> Result<String, AppError> {
+/// `text_align: text.match?(RTL_REGEXP) ? :right : :left`.
+fn rtl_align(text: &str) -> Align {
     if is_rtl(text) {
-        return Err(unsupported("Right-to-left text in the audit trail"));
+        Align::Right
+    } else {
+        Align::Left
     }
-    Ok(text.to_owned())
 }
 
 /// `String#squish`.
@@ -658,7 +658,7 @@ async fn build(data: &mut Data<'_>, editor: &mut Editor) -> Result<(), AppError>
             .join("\n");
         rows.push(vec![
             Some(styles.text(
-                vec![Piece::Regular(ltr(&blob.filename)?)],
+                vec![Piece::Regular(maybe_rtl_reverse(&blob.filename)?)],
                 FONT_SIZE,
                 1.0,
                 Align::Left,
@@ -854,14 +854,14 @@ async fn submitter_boxes(
     if roles > 1 {
         contact.push(Piece::Regular(format!(
             "{}\n",
-            ltr(&item.get("name").map(ruby_to_s).unwrap_or_default())?
+            maybe_rtl_reverse(&item.get("name").map(ruby_to_s).unwrap_or_default())?
         )));
     }
     if let Some(email) = &submitter.email {
         contact.push(Piece::Bold(format!("{email}\n")));
     }
     if let Some(name) = &submitter.name {
-        contact.push(Piece::Regular(format!("{}\n", ltr(name)?)));
+        contact.push(Piece::Regular(format!("{}\n", maybe_rtl_reverse(name)?)));
     }
     if let Some(phone) = &submitter.phone {
         contact.push(Piece::Regular(format!("{phone}\n")));
@@ -1057,7 +1057,7 @@ async fn submitter_boxes(
         }
 
         let label = {
-            let upper = ltr(&field_name)?.to_uppercase();
+            let upper = maybe_rtl_reverse(&field_name)?.to_uppercase();
             if upper.trim().is_empty() {
                 format!("{} {}", data.t(&format!("{kind}_field")), counters[&kind]).to_uppercase()
             } else {
@@ -1068,7 +1068,7 @@ async fn submitter_boxes(
             vec![Piece::Regular(label)],
             6.0,
             1.3,
-            Align::Left,
+            rtl_align(&field_name),
             padding(0.0, 0.0, 2.0, 0.0),
         ));
 
@@ -1156,7 +1156,7 @@ async fn submitter_boxes(
                     format!("{}/e/{}", state.default_url(), data.form.submission.slug)
                 };
                 links.push(Piece::Link {
-                    text: format!("{}\n", ltr(&blob.filename)?),
+                    text: format!("{}\n", maybe_rtl_reverse(&blob.filename)?),
                     uri,
                 });
             }
@@ -1202,16 +1202,18 @@ async fn submitter_boxes(
             {
                 text = crate::email_variables::mask_value(&text, mask);
             }
-            let text = if text.is_empty() {
+            // `value.to_s.presence || 'n/a'`, aligned right when the value is right-to-left.
+            let align = rtl_align(&text);
+            let text = if text.chars().all(char::is_whitespace) {
                 "n/a".to_owned()
             } else {
-                ltr(&text)?
+                maybe_rtl_reverse(&text)?
             };
             boxes.push(styles.text(
                 vec![Piece::Regular(text)],
                 FONT_SIZE,
                 1.0,
-                Align::Left,
+                align,
                 padding(0.0, 0.0, 10.0, 0.0),
             ));
         }
@@ -1269,7 +1271,7 @@ async fn event_rows(
             .flatten()
             .next()
         };
-        let submitter_name = ltr(&squish(name.unwrap_or_default()))?;
+        let submitter_name = maybe_rtl_reverse(&squish(name.unwrap_or_default()))?;
         let names = || ("submitter_name", submitter_name.clone());
         let invited = (kind == "invite_party")
             .then(|| {
@@ -1304,7 +1306,10 @@ async fn event_rows(
         } else if let Some(invited) = invited {
             data.t_with(
                 "submission_event_names.invite_party_by_html",
-                &[("invited_submitter_name", ltr(&invited)?), names()],
+                &[
+                    ("invited_submitter_name", maybe_rtl_reverse(&invited)?),
+                    names(),
+                ],
             )
         } else if data.configs.with_audit_sender && (kind == "send_email" || kind == "send_sms") {
             let user = match created_by {
@@ -1326,7 +1331,7 @@ async fn event_rows(
                     &[names()]
                 ),
                 data.t("from"),
-                ltr(&squish(&full_name))?,
+                maybe_rtl_reverse(&squish(&full_name))?,
                 user.email
             )
         } else if kind == "delegate_form" {
@@ -1346,7 +1351,7 @@ async fn event_rows(
             data.t_with(
                 "submission_event_names.delegate_form_by_html",
                 &[
-                    ("from", ltr(&squish(&from))?),
+                    ("from", maybe_rtl_reverse(&squish(&from))?),
                     (
                         "to",
                         event_data.get("email").map(ruby_to_s).unwrap_or_default(),
