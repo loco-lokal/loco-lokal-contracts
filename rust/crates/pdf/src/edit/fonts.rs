@@ -109,14 +109,23 @@ pub struct Afm {
     /// Glyph names and widths; a glyph's id is its index here.
     glyphs: Vec<(String, f64)>,
     by_name: HashMap<String, u16>,
+    /// Each glyph's bounding box bottom and top (`B`), by glyph id.
+    glyph_y: Vec<(f64, f64)>,
+    /// The built-in encoding (`C`): code to glyph id.
+    codes: HashMap<u8, u16>,
     ascender: f64,
     descender: f64,
+    pub cap_height: f64,
+    pub bbox: [f64; 4],
     underline: (f64, f64),
 }
 
 impl Afm {
     fn parse(name: &str, text: &str) -> Self {
         let mut glyphs = Vec::new();
+        let mut glyph_y = Vec::new();
+        let mut codes = HashMap::new();
+        let mut cap_height = 0.0;
         let mut ascender = 0.0;
         let mut descender = 0.0;
         let mut bbox = [0.0; 4];
@@ -126,6 +135,9 @@ impl Afm {
                 underline.0 = rest.trim().parse().unwrap_or(underline.0);
             } else if let Some(rest) = line.strip_prefix("UnderlineThickness ") {
                 underline.1 = rest.trim().parse().unwrap_or(underline.1);
+            }
+            if let Some(rest) = line.strip_prefix("CapHeight ") {
+                cap_height = rest.trim().parse().unwrap_or(0.0);
             }
             if let Some(rest) = line.strip_prefix("Ascender ") {
                 ascender = rest.trim().parse().unwrap_or(0.0);
@@ -138,16 +150,32 @@ impl Afm {
             } else if line.starts_with("C ") {
                 let mut width = None;
                 let mut glyph = None;
+                let mut code = None;
+                let mut y = (0.0, 0.0);
                 for part in line.split(';') {
                     let part = part.trim();
                     if let Some(w) = part.strip_prefix("WX ") {
                         width = w.trim().parse().ok();
                     } else if let Some(n) = part.strip_prefix("N ") {
                         glyph = Some(n.trim().to_owned());
+                    } else if let Some(c) = part.strip_prefix("C ") {
+                        code = c.trim().parse::<u8>().ok();
+                    } else if let Some(b) = part.strip_prefix("B ") {
+                        let values: Vec<f64> = b
+                            .split_whitespace()
+                            .filter_map(|v| v.parse().ok())
+                            .collect();
+                        if values.len() == 4 {
+                            y = (values[1], values[3]);
+                        }
                     }
                 }
                 if let (Some(w), Some(n)) = (width, glyph) {
+                    if let Some(code) = code {
+                        codes.insert(code, u16::try_from(glyphs.len()).unwrap_or(u16::MAX));
+                    }
                     glyphs.push((n, w));
+                    glyph_y.push(y);
                 }
             }
         }
@@ -166,14 +194,54 @@ impl Afm {
             name: name.to_owned(),
             glyphs,
             by_name,
+            glyph_y,
+            codes,
             ascender,
             descender,
+            cap_height,
+            bbox,
             underline,
         }
     }
 
     fn glyph(&self, name: &str) -> Option<u16> {
         self.by_name.get(name).copied()
+    }
+
+    #[must_use]
+    pub fn ascender(&self) -> f64 {
+        self.ascender
+    }
+
+    #[must_use]
+    pub fn descender(&self) -> f64 {
+        self.descender
+    }
+
+    /// Whether the font has a glyph for the character (`GlyphList.unicode_to_name`).
+    #[must_use]
+    pub fn has_glyph_for(&self, c: char) -> bool {
+        glyph_name(c).and_then(|name| self.glyph(name)).is_some()
+    }
+
+    /// The glyph the built-in encoding has at `code` (`@encoding.name(codepoint)` for
+    /// `ZapfDingbats`), with its bounding box bottom and top.
+    #[must_use]
+    pub fn builtin_glyph(&self, code: u8) -> Option<(Glyph, (f64, f64))> {
+        let id = *self.codes.get(&code)?;
+        let (name, width) = self.glyphs.get(usize::from(id))?;
+        let _ = name;
+        Some((
+            Glyph {
+                id,
+                width: *width,
+                text: char::from(code).to_string(),
+            },
+            self.glyph_y
+                .get(usize::from(id))
+                .copied()
+                .unwrap_or_default(),
+        ))
     }
 }
 
@@ -317,7 +385,7 @@ macro_rules! afm {
     };
 }
 
-const AFMS: [(&str, &str); 12] = [
+const AFMS: [(&str, &str); 13] = [
     afm!("Courier"),
     afm!("Courier-Bold"),
     afm!("Courier-Oblique"),
@@ -330,6 +398,7 @@ const AFMS: [(&str, &str); 12] = [
     afm!("Times-Bold"),
     afm!("Times-Italic"),
     afm!("Times-BoldItalic"),
+    afm!("ZapfDingbats"),
 ];
 
 /// The process-wide font cache (fonts are large and read once).
@@ -377,6 +446,7 @@ fn standard_font_name(family: &str, variant: &str) -> Option<&'static str> {
         ("Courier", "italic") => "Courier-Oblique",
         ("Courier", "bold_italic") => "Courier-BoldOblique",
         ("Courier", _) => "Courier",
+        ("ZapfDingbats", _) => "ZapfDingbats",
         _ => return None,
     })
 }
