@@ -1,0 +1,46 @@
+{#- Port of app/views/submit_form_draw_signature/show.html.erb (no layout) -#}
+{% import "shared/_button_title.html" as buttons %}
+<!DOCTYPE html>
+<html data-theme="docuseal" lang="en">
+  <head>
+    {% include "layouts/_head_tags.html" %}
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{ csrf_meta_tags() }}
+    {{ javascript_pack_tag('draw', defer=true) }}
+    {{ stylesheet_pack_tag('form', media='all') }}
+  </head>
+  <body>
+    <draw-signature data-slug="{{ slug }}" data-color="{{ color }}" class="flex items-center h-screen p-2 justify-center">
+      <form style="max-width: 900px; width: 100%; margin-bottom: 120px" action="{{ form_path }}" accept-charset="UTF-8" method="post"><input type="hidden" name="_method" value="put" /><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+        <input value="" type="hidden" name="values[{{ field_uuid }}]">
+        <div class="font-semibold text-4xl text-center w-full mb-2">
+          {{ t('draw_signature') }}
+        </div>
+        <div class="w-full bg-white rounded-2xl border relative" style="height: 300px">
+          <canvas class="w-full"></canvas>
+          <button aria-label="Clear" class="btn btn-ghost btn-sm font-medium top-0 right-0 absolute mt-1 mr-1">
+            {{ svg_icon('reload', class='w-5 h-5') }}
+            <span class="inline">{{ t('clear') }}</span>
+          </button>
+        </div>
+        <div class="mt-4">
+          <button disabled class="base-button w-full">
+            {{ t('submit') }}
+          </button>
+          <button name="button" type="submit" class="base-button w-full" style="display: none">{{ buttons.button_title(title=t('submit'), disabled_with=t('submitting')) }}
+</button>
+        </div>
+</form>      <div id="success" class="text-center p-2 hidden" style="margin-bottom: 100px">
+        <div class="flex items-center space-x-1 items-center justify-center text-2xl font-semibold mb-2">
+          {{ svg_icon('circle_check', class='text-green-600') }}
+          <span>
+            {{ t('signature_uploaded') }}
+          </span>
+        </div>
+        <div>
+          {{ t('return_back_to_your_desktop_device_to_complete_the_form_or_continue_on_mobile_html', link=form_path) }}
+        </div>
+      </div>
+    </draw-signature>
+  </body>
+</html>

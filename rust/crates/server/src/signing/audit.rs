@@ -52,7 +52,7 @@ const LOGO_PNG: &[u8] = include_bytes!("../../../../../lib/pdf_icons/logo.png");
 
 const WITH_AUDIT_VALUES_KEY: &str = "with_audit_values";
 const WITH_AUDIT_SENDER_KEY: &str = "with_audit_sender";
-const COMBINE_PDF_RESULT_KEY: &str = "combine_pdf_result_key";
+pub(super) const COMBINE_PDF_RESULT_KEY: &str = "combine_pdf_result_key";
 
 /// `EnsureAuditGenerated::CHECK_COMPLETE_TIMEOUT`.
 const CHECK_COMPLETE_TIMEOUT: Duration = Duration::from_secs(90);

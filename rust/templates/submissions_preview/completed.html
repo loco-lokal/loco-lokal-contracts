@@ -1,0 +1,46 @@
+{#- Port of app/views/submissions_preview/completed.html.erb -#}
+{% extends "layouts/form.html" %}
+{% import "shared/_button_title.html" as buttons %}
+{% block content %}
+<div class="max-w-md mx-auto px-2 mt-12 mb-4">
+  <div class="space-y-6 mx-auto">
+    <div class="space-y-6">
+      <div class="flex items-center justify-center">
+        {% include "start_form/_banner.html" %}
+      </div>
+      <div class="flex items-center bg-base-200 rounded-xl p-4 mb-4">
+        <div class="flex items-center">
+          <div class="mr-3">
+            {{ svg_icon('writing_sign', class='w-10 h-10') }}
+          </div>
+          <div>
+            <p dir="auto" class="text-lg font-bold mb-1">{{ name }}</p>
+            {% if signed_text %}
+              <p dir="auto" class="text-sm">
+                {{ signed_text }}
+              </p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if can_email %}
+      <form class="space-y-4" action="/send_submission_email" accept-charset="UTF-8" method="post"><input type="hidden" name="authenticity_token" value="{{ csrf_token }}" />
+        <div dir="auto" class="form-control !mt-0">
+          <input value="{{ submission_slug }}" type="hidden" name="submission_slug" id="submission_slug" />
+          <label class="label" for="email">{{ t('email') }}</label>
+          <input {% if email is not none %}value="{{ email }}" {% endif %}required="required" class="base-input" placeholder="{{ t('send_copy_to_email') }}" type="email" name="email" id="email" />
+          {% if status_error %}
+            <span class="label-text-alt text-red-400 mt-1">
+              {{ t('please_enter_your_email_address_associated_with_the_completed_submission') }}
+            </span>
+          {% endif %}
+        </div>
+        <toggle-submit dir="auto" class="form-control">
+          <button name="button" type="submit" class="base-button">{{ buttons.button_title(title=t('send_copy_to_email'), disabled_with=t('starting')) }}
+</button>
+        </toggle-submit>
+</form>  {% endif %}</div>
+</div>
+{% include "shared/_attribution.html" %}
+{% endblock %}

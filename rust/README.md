@@ -119,6 +119,8 @@ cd rust/scripts/parity
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
 ./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
+./preview.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # submission preview /e/:slug (signed out, sig, signed in), /e/:slug/completed, /e/:slug/download, /p/:slug
+./email_2fa.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # email one-time codes on /s/:slug and /d/:slug: pages, redirects, emails, otp_challenges and events
 ```
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
@@ -166,7 +168,18 @@ The rest of Phase 4 adds the links around the signing form:
 - `loco_rails_compat::cookies` reads and writes Rails' `cookies.encrypted` values, so the `start_form_slug` and `email_2fa_slug` cookies work across both servers. Like Rails, the Rust server does not write these secure cookies on plain-http requests in production.
 - Devise's sign-in redirect is now an absolute URL, as in Rails.
 
-`downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
+- `signing/preview.rs`: the submission preview `/e/:slug` (the target of documents copy links and `{{documents.link}}`), signed out, with the `sig` link, and with the extra controls a signed-in user of the account sees (edit, send email/SMS, sign in person, resubmit, unarchive, the event log, revealing masked values); the 40 minute window and two-factor parties that redirect to `/e/:slug/completed`; the completed page with the copy-to-email form (`?status=error`, `email`); `/e/:slug/download`; and `/p/:slug`, the page a phone opens to draw a signature.
+
+`downloads.py`, `start_form.py` and `preview.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies. `preview.py` signs in on both servers as `parity-viewer@example.com`, a user that `seed.rb` creates (run `seed.sh` again on an existing database).
+
+Email two-factor verification (`signing/email_2fa.rs`, `otp.rs`):
+
+- The signing form with `require_email_2fa` renders `submit_form/email_2fa`. `PUT /submit_form_email_2fa` queues `SubmitterMailer#otp_verification_email` (and the `send_2fa_email` event), at most once per 15 seconds; `POST /submit_form_email_2fa` checks the code, records `email_verified` and sets the `email_2fa_slug` cookie.
+- The share link asks for a code with `shared_link_2fa`, and when a pending party is reopened without the `start_form_slug` cookie: `start_form/email_verification`, `TemplateMailer#otp_verification_email`, the resend button (`POST /start_form_email_2fa_send`) and `?email_verification`. Resubmitting (`/resubmit_form`) with `shared_link_2fa` asks for a code too.
+- `OtpChallenges`: the same HOTP codes, nonces and `otp_challenges` rows as Rails, so a code sent by one server verifies on the other. Codes are reused for 5 minutes and expire after 10; 20 failed attempts in 23 hours (100 overall) answer "too many attempts".
+- The `RateLimit` calls of these endpoints (two per 45 seconds, per process) apply as in Rails, which enables them outside multitenant mode too. The bounced-email checks and the `custom_otp_email` sender are multitenant-only and not ported, so `start_form/error` (shown for a bounced address) is never rendered.
+
+`email_2fa.py` covers these. It reads the codes from Mailpit and waits out the send limits between cases.
 
 Result documents and their signatures, continued (issue #5):
 
@@ -185,9 +198,9 @@ These parts return 422 ("not supported yet") or are still missing:
   - form field appearances where HexaPDF would fail and Rails would leave the form unflattened: text the field's font cannot encode, embedded TrueType or symbol fonts, CMYK text, `AFTime_Format`, combo boxes with several values, and list box values that are not options;
   - signing with the `docuseal_aatl` certificate without `CERTS`, with a certificate without its private key, or with a non-RSA key.
 - Combined result documents (`combine_pdf_result_key`) fail the completion job with "not supported yet".
-- Email two-factor verification: sending and checking codes on the signing form and the share link (`shared_link_2fa`, reopening a pending party without the start form cookie, `?email_verification`) answers 422. A valid `email_2fa_slug` cookie or two-factor token is accepted.
-- Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission) answer 422.
-- The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
+- Share link email two-factor verification for a party without an email (a `link_form_fields` without `email`) answers 422.
+- Combined result downloads (`?combined=true`, or `combine_pdf_result_key` on a completed submission), including `/e/:slug/download`, answer 422.
+- The submission preview `/e/:slug` in the mobile app (`Hotwire Native` user agents) and for dynamic documents answers 422.
 - Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).
 - Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
