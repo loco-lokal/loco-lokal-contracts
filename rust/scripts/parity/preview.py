@@ -196,7 +196,7 @@ def main():
     both("completed page in German", f"/e/{slug}/completed?lang=de")
     both("completed page, signed in", f"/e/{slug}/completed", signed_in)
     download("download", f"/e/{slug}/download")
-    unsupported("download combined", f"/e/{slug}/download?combined=true")
+    download("download combined", f"/e/{slug}/download?combined=true")
     both("draw signature after completion", f"/p/{created[1]['slug']}?f={countersignature[:8]}")
 
     # A signed link of another submission is ignored.
