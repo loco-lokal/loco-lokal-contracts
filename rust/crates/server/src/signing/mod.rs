@@ -10,6 +10,7 @@ pub mod downloads;
 pub mod email_2fa;
 pub mod emails;
 pub mod pages;
+pub mod preview;
 pub mod results;
 pub mod send_email;
 pub mod start_form;
@@ -58,6 +59,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/d/{slug}/completed", get(start_form::completed))
         .route("/send_submission_email", post(send_email::create))
+        .route("/e/{slug}", get(preview::show))
+        .route("/e/{slug}/completed", get(preview::completed))
+        .route("/e/{slug}/download", get(preview::download))
+        .route("/p/{slug}", get(preview::draw_signature))
         .route(
             "/submit_form_email_2fa",
             post(email_2fa::verify)
