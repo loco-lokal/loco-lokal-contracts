@@ -117,6 +117,7 @@ cd rust/scripts/parity
 ./webhooks.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # webhook bodies, headers, signatures, event/attempt rows (API and signing form)
 ./downloads.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # /s/:slug/download, /s/:slug/documents, /submitters/:key/download; the linked files
 ./start_form.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID" # share link /d/:slug: pages, start/reopen, completed page, resubmit; stored rows
+./previews.py                                        # /preview/:signed_key/:page, /templates/:id/preview, documents_page_objects (seeds its own template)
 ```
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
@@ -164,6 +165,16 @@ The rest of Phase 4 adds the links around the signing form:
 
 `downloads.py` and `start_form.py` cover these; `emails.py` also covers delegating and `/send_submission_email`. `start_form.py` sends `X-Forwarded-Proto: https` so that Rails, which runs in production mode, writes its cookies.
 
+The document page endpoints around the template builder:
+
+- `template_preview.rs`: the lazy `/preview/:signed_key/:page` images (`PreviewDocumentPageController`). A page without a stored preview is rendered with PDFium and stored as `"#{page}.jpg"` with Rails' blob metadata; stored previews redirect to their disk URL.
+- `loco_pdf::jpeg` writes these JPEGs as libvips with libjpeg-turbo does (`interlace: true, Q: PAGE_QUALITY`): its EXIF block, 4:2:0, the islow DCT, the simple progression script and optimized Huffman tables. The files are byte for byte Rails'.
+- `/templates/:id/preview` (`TemplatesPreviewController`): the read-only builder in the `plain` layout, with `Templates.serialize_for_builder` as `data-template`.
+- `/templates/:id/documents_page_objects` (`TemplateDocumentsPageObjectsController`): `loco_pdf::pages` flattens the page, unwraps form XObjects and applies the rotation through PDFium, as `lib/pdfium.rb` does, and sorts the characters with musl's `qsort_r` (what Ruby's `sort` calls in the Rails image).
+- `loco_rails_compat::json` writes floats as the `json` gem (2.21, `fpconv`) does, so `render json:` bodies match Rails' digits. `api::rails_json` uses it for every response.
+
+`previews.py` covers these. `/templates/:id/preview` in the Hotwire Native apps answers 422.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -180,7 +191,8 @@ These parts return 422 ("not supported yet") or are still missing:
 - The submission preview `/e/:slug` (the target of documents copy links) and `/p/:slug` (drawing a signature on a phone).
 - Share link starts without the requested details (the browser requires them), and resubmitting with `default_values`, answer 422.
 - The signed-out landing page at `/` (Rails renders it; the Rust server redirects to sign-in).
-- Stamp fields (422 on completion), dynamic documents (422 on the page; Phase 5), and the lazy `/preview/:signed_key/:page` images.
+- Stamp fields (422 on completion) and dynamic documents (422 on the page; Phase 5).
+- `/templates/:id/preview` in the Hotwire Native apps (422).
 - The remember-signature cookie, and presigned URLs for cloud storage services (cloud blobs go through the blob proxy instead).
 - Creating `completed` submitters and completing them through `PUT /api/submitters/:id`, and prefilling attachment fields.
 - Expiration jobs (Phase 7).

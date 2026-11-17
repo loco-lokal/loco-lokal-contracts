@@ -1,0 +1,6 @@
+{#- Port of app/views/templates_preview/show.html.erb (Hotwire Native apps answer 422).
+    `template_data` is `Templates.serialize_for_builder(@template).to_json`. -#}
+{% extends "layouts/plain.html" %}
+{% block content %}
+<template-builder data-native-platform="" class="grid" data-editable="false" data-with-sign-yourself-button="{{ with_sign_yourself_button }}" data-with-send-button="{{ with_send_button }}" data-template="{{ template_data }}"></template-builder>
+{% endblock %}

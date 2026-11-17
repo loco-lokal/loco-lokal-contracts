@@ -23,6 +23,7 @@ pub mod search;
 pub mod session;
 pub mod signing;
 pub mod state;
+pub mod template_preview;
 pub mod validation;
 pub mod webhooks;
 

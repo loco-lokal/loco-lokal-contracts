@@ -78,8 +78,8 @@ pub fn router() -> Router<AppState> {
 }
 
 /// `render json:` with Rails' escaping: `<`, `>`, `&`, U+2028 and U+2029 become `\uXXXX`
-/// (`ActiveSupport.escape_html_entities_in_json`). They only occur inside strings, so
-/// escaping the serialized text is safe.
+/// (`ActiveSupport.escape_html_entities_in_json`), and floats are written as the `json` gem
+/// writes them.
 #[must_use]
 pub fn render(status: StatusCode, value: &Value) -> Response {
     let mut response = (status, Body::from(rails_json(value))).into_response();
@@ -90,22 +90,10 @@ pub fn render(status: StatusCode, value: &Value) -> Response {
     response
 }
 
-/// `value.to_json` as Active Support encodes it (see [`render`]).
+/// `value.to_json` as Active Support encodes it (see [`render`]), floats included.
 #[must_use]
 pub fn rails_json(value: &Value) -> String {
-    let text = value.to_string();
-    let mut escaped = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '<' => escaped.push_str("\\u003c"),
-            '>' => escaped.push_str("\\u003e"),
-            '&' => escaped.push_str("\\u0026"),
-            '\u{2028}' => escaped.push_str("\\u2028"),
-            '\u{2029}' => escaped.push_str("\\u2029"),
-            c => escaped.push(c),
-        }
-    }
-    escaped
+    loco_rails_compat::json::generate(value)
 }
 
 #[must_use]
