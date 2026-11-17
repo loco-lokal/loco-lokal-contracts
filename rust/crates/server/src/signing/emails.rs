@@ -508,7 +508,11 @@ async fn completed_attachments(
 
     let mut out = Vec::new();
     let mut total_size = 0;
-    let audit = if with_audit_log {
+    let audit = if with_audit_log
+        && documents
+            .first()
+            .is_none_or(|(a, _)| a.name != "combined_document")
+    {
         Attachment::with_blobs_for_records(
             &state.db,
             "Submission",
@@ -607,10 +611,9 @@ async fn select_completed_documents(
     else {
         return Ok(Vec::new());
     };
-    super::audit::check_combined(state, vars.account.id).await?;
     super::results::ensure_result_generated(state, &last).await?;
     let form = Form::for_submitter(state, last).await?;
-    super::audit::select_attachments(state, &form).await
+    super::combined::select_attachments_for_download(state, &form).await
 }
 
 async fn add_with_size_limit<'a>(

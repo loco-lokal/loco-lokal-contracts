@@ -866,7 +866,7 @@ async fn build_submitter(
     // `completed_at: attrs[:completed].present? ? Time.current : nil` and
     // `assign_completed_attributes`, over the recipients built so far.
     let completed_at = (!blank(attrs.get("completed"))).then(|| Utc::now().naive_utc());
-    if completed_at.is_some() {
+    if let Some(completed_at) = completed_at {
         let form = draft_form(
             auth,
             draft,
@@ -884,7 +884,9 @@ async fn build_submitter(
                 completed_at: None,
             },
         );
-        match crate::signing::submit::assign_completed_values(state, &form, None).await? {
+        match crate::signing::submit::assign_completed_values(state, &form, completed_at, None)
+            .await?
+        {
             Ok(values) => stored_values = values,
             Err(
                 crate::signing::submit::SubmitError::Invalid(message)

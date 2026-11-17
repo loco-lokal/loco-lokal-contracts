@@ -33,35 +33,8 @@ fn head(status: StatusCode) -> Response {
     status.into_response()
 }
 
-/// 422 for the combined result document, which is not ported.
-fn combined_unsupported() -> Response {
-    (
-        StatusCode::UNPROCESSABLE_ENTITY,
-        axum::Json(serde_json::json!({
-            "error": "Combining the result documents into one PDF is not supported yet"
-        })),
-    )
-        .into_response()
-}
-
-/// `select_attachments_for_download` uses the combined document for completed
-/// submissions without verification fields when the account combines results.
-async fn uses_combined(state: &AppState, form: &Form) -> Result<bool, AppError> {
-    if form.submission.completed_at.is_none()
-        || form
-            .fields()
-            .iter()
-            .any(|f| f.get("type").and_then(Value::as_str) == Some("verification"))
-    {
-        return Ok(false);
-    }
-    Ok(super::audit::check_combined(state, form.account.id)
-        .await
-        .is_err())
-}
-
 /// `ActiveStorage::Blob.proxy_path(blob, expires_at: FILES_TTL.from_now.to_i, filename:)`.
-async fn proxy_path(
+pub(super) async fn proxy_path(
     state: &AppState,
     blob: &mut Blob,
     filename: Option<&str>,
@@ -78,19 +51,21 @@ async fn proxy_path(
     ))
 }
 
-/// `Submitters.select_attachments_for_download(submitter)`, rejecting combined results
-/// where Rails would use them (completed submission, no verification fields).
+/// `Submitters.select_attachments_for_download(submitter)`.
 async fn select_for_download(
     state: &AppState,
     submitter: Submitter,
 ) -> Result<(Form, Vec<(Attachment, Blob)>), AppError> {
     let form = Form::for_submitter(state, submitter).await?;
-    let attachments = super::audit::select_attachments(state, &form).await?;
+    let attachments = super::combined::select_attachments_for_download(state, &form).await?;
     Ok((form, attachments))
 }
 
 /// `Submitters.build_document_urls(submitter)`.
-async fn build_document_urls(state: &AppState, submitter: Submitter) -> Result<Value, AppError> {
+pub(super) async fn build_document_urls(
+    state: &AppState,
+    submitter: Submitter,
+) -> Result<Value, AppError> {
     let (_, attachments) = select_for_download(state, submitter.clone()).await?;
     let filename_format = super::emails::filename_format(state, submitter.account_id).await?;
     let mut vars = Vars::load(state, submitter)
@@ -183,6 +158,24 @@ pub async fn partial(
     Ok(crate::api::ok(&Value::Array(urls)))
 }
 
+/// `Submitter.find_signed(sig, purpose: :download_completed)`.
+pub(super) async fn signed_submitter(
+    state: &AppState,
+    sig: &str,
+) -> Result<Option<Submitter>, AppError> {
+    let purpose = loco_rails_compat::signed_id_purpose("submitter", Some("download_completed"));
+    let Some(id) = state
+        .secrets
+        .signed_id_verifier
+        .verify(sig, Some(&purpose))
+        .ok()
+        .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
+    else {
+        return Ok(None);
+    };
+    Ok(loco_db::submissions::find_submitter(&state.db, id).await?)
+}
+
 /// `GET /s/:slug/documents` and `GET /submitters/:slug/download`.
 pub async fn completed(
     State(state): State<AppState>,
@@ -201,19 +194,10 @@ async fn completed_for(
     headers: &HeaderMap,
     params: &Params,
 ) -> Result<Response, AppError> {
-    let mut signed = None;
-    if let Some(sig) = params.str("sig") {
-        let purpose = loco_rails_compat::signed_id_purpose("submitter", Some("download_completed"));
-        if let Some(id) = state
-            .secrets
-            .signed_id_verifier
-            .verify(&sig, Some(&purpose))
-            .ok()
-            .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
-        {
-            signed = loco_db::submissions::find_submitter(&state.db, id).await?;
-        }
-    }
+    let signed = match params.str("sig") {
+        Some(sig) => signed_submitter(state, &sig).await?,
+        None => None,
+    };
     let signature_valid = signed.as_ref().is_some_and(|s| s.slug == slug);
     let submitter = match signed.filter(|_| signature_valid) {
         Some(s) => s,
@@ -262,16 +246,14 @@ async fn completed_for(
         }
     }
 
-    let last_form = Form::for_submitter(state, last.clone()).await?;
     if params.str("combined").as_deref() == Some("true") {
-        // `build_combined_url` is nil until the submission completes.
-        if last_form.submission.completed_at.is_none() {
-            return Ok(head(StatusCode::NOT_FOUND));
-        }
-        return Ok(combined_unsupported());
-    }
-    if uses_combined(state, &last_form).await? {
-        return Ok(combined_unsupported());
+        let last_form = Form::for_submitter(state, last).await?;
+        return Ok(
+            match super::combined::build_combined_url(state, &last_form).await? {
+                Some(url) => crate::api::ok(&Value::Array(vec![Value::String(url)])),
+                None => head(StatusCode::NOT_FOUND),
+            },
+        );
     }
     let urls = build_document_urls(state, last).await?;
     Ok(crate::api::ok(&urls))
@@ -306,14 +288,6 @@ pub async fn submitter(
         return Ok(redirect_to(&state, &headers, "/"));
     }
     super::results::ensure_result_generated(&state, &submitter).await?;
-    if uses_combined(
-        &state,
-        &Form::for_submitter(&state, submitter.clone()).await?,
-    )
-    .await?
-    {
-        return Ok(combined_unsupported());
-    }
     let urls = build_document_urls(&state, submitter).await?;
     Ok(crate::api::ok(&urls))
 }

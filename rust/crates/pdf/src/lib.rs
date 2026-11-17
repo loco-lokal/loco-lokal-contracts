@@ -5,6 +5,7 @@ pub mod cms;
 pub mod edit;
 pub mod signatures;
 pub mod text;
+pub mod text_image;
 
 use std::path::{Path, PathBuf};
 

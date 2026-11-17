@@ -298,13 +298,14 @@ pub async fn update(
         completing.submission.template_fields =
             fields.as_ref().map(|f| JsonText(Value::Array(f.clone())));
         completing.submission.template_schema = schema.as_ref().map(|s| JsonText(s.clone()));
-        match assign_completed_values(&state, &completing, None).await? {
+        let completed_at = Utc::now().naive_utc();
+        match assign_completed_values(&state, &completing, completed_at, None).await? {
             Ok(values) => changes.values = JsonText(Value::Object(values)),
             Err(SubmitError::Invalid(message) | SubmitError::Required(message)) => {
                 return Ok(unprocessable(&message));
             }
         }
-        changes.completed_at = Some(Utc::now().naive_utc());
+        changes.completed_at = Some(completed_at);
         form = Some(completing);
     }
 
