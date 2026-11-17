@@ -124,7 +124,10 @@ cd rust/scripts/parity
 ./combined.py                                        # combine_pdf_result_key, in its own account: combined PDF, rows, emails, downloads, API
 ./preview.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"   # submission preview /e/:slug (signed out, sig, signed in), /e/:slug/completed, /e/:slug/download, /p/:slug
 ./email_2fa.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # email one-time codes on /s/:slug and /d/:slug: pages, redirects, emails, otp_challenges and events
+./uploads.py "$PARITY_TOKEN"                         # template uploads and added documents: responses, stored rows, preview PNGs
 ```
+
+`uploads.py` signs in on both servers as a user that `uploads_seed.rb` creates with a known password, and uploads PDFs (form fields, links, 18 pages, a password) and images that the seed builds with HexaPDF and libvips. It needs Pillow, and reads the stored previews through the `rails` service.
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
 
@@ -218,6 +221,18 @@ Issue #7 ports the remaining signing-form endpoints and API gaps:
 
 `create.py` covers the API changes, `start_form.py` the share link changes, and `form_extras.py` and `tools.py` the rest.
 
+Template uploads port `TemplatesUploadsController#create` (`POST /templates_upload`), `TemplateDocumentsController#create` (`POST /templates/:id/documents`), `Templates::CreateAttachments` and `Templates::ProcessDocument` (`templates/`, `loco_pdf::upload`):
+
+- PDFs and images (PNG, JPEG, ICO, BMP; other image types fail as in Rails). Password-protected PDFs get the password prompt and are stored decrypted.
+- Form fields extracted from the PDF (`Templates::FindPdfiumAcroFields`), and its `http(s)` links in `metadata.pdf.annotations` (`Templates::BuildPdfiumAnnotations`).
+- Blob and attachment rows with Rails' metadata, key order included. Uploaded files are identified by content, as Marcel does.
+- `preview_images`: up to 16 pages, with select placeholders hidden and form fields flattened, rendered 1400 px wide. They are written as libvips writes them: quantized by libimagequant 4.2.2 (the version in Rails' image) to a 2-, 4- or 8-bit palette, with the same `eXIf` and `pHYs` chunks. Images are turned upright and scaled to 1400 px.
+- The `template.created` webhook and the search entry. A failed upload keeps the template and documents created so far, as in Rails.
+- `Templates::BuildImagePagePdf` (`loco_pdf::image_page`), byte for byte. Nothing calls it yet; Rails uses it to edit documents in the template builder.
+- `POST /api/templates` does not exist in this edition: like Rails, the Rust server answers 404, and `{"message": "This feature is not available in this edition"}` for `/api/templates/pdf`, `…/docx` and the other enterprise paths. Unrouted methods now answer 404 instead of 405, and unrouted paths pick HTML or JSON from the `Accept` header, as `ErrorsController` does.
+
+Preview pages of PDFs come out pixel for pixel as in Rails, although the two `PDFium` builds differ. Rails' build reads checkbox and radio states through its own "raw" functions; the Rust server loads the page's form view instead, so the standard functions see them too. Previews of uploaded images differ slightly (mean difference below 0.3 of 255), because `image`'s filters replace libvips' resize, so their palettes can have a few more or fewer colors. The PNG compression differs as well, so preview byte sizes and checksums are not the same as Rails'.
+
 These parts return 422 ("not supported yet") or are still missing:
 
 - These result documents fail the completion job with "not supported yet":
@@ -234,6 +249,9 @@ These parts return 422 ("not supported yet") or are still missing:
 - Stamp fields of a recipient that `POST /api/submissions` creates as `completed` answer 422.
 - `/api/tools/merge` with documents that have form fields; `/api/tools/verify` with RFC 3161 timestamp signatures, signatures without RSA keys, revisions after the last signature that end with `%%EOF` (`FPDF_HasOnlyDSSChanges`), and trusted certificates other than the generated ones (custom certificates, `CERTS`, `TRUSTED_CERTS`).
 - Expiration jobs (Phase 7).
+- Extracting email assets from message bodies of 2 KB or more.
+- Uploading Word documents (Rails converts them with the closed-source `WordCraft` gem), ZIP archives, and documents from a URL (`/templates_upload/new`, `params[:url]`) answer 422.
+- The template builder itself (`/templates/:id/edit`, where uploads redirect) and MCP's `create_template`.
 
 ## Layout
 

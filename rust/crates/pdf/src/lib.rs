@@ -3,9 +3,11 @@
 
 pub mod cms;
 pub mod edit;
+pub mod image_page;
 pub mod signatures;
 pub mod text;
 pub mod text_image;
+pub mod upload;
 
 use std::path::{Path, PathBuf};
 

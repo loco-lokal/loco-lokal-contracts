@@ -43,6 +43,41 @@ pub(crate) async fn verify_password(password: String, encrypted: String) -> anyh
     .await?)
 }
 
+/// `ErrorsController::ENTERPRISE_PATHS`: unrouted requests to these paths answer 404
+/// with a message instead of the plain error.
+const ENTERPRISE_PATHS: &[&str] = &[
+    "/submissions/html",
+    "/api/submissions/html",
+    "/templates/html",
+    "/api/templates/html",
+    "/submissions/pdf",
+    "/api/submissions/pdf",
+    "/templates/pdf",
+    "/api/templates/pdf",
+    "/templates/doc",
+    "/api/templates/doc",
+    "/templates/docx",
+    "/api/templates/docx",
+];
+
+/// POST to the enterprise paths (the other methods route to `show`, `update` and
+/// `destroy` with these ids).
+fn enterprise_routes() -> Router<AppState> {
+    ENTERPRISE_PATHS.iter().fold(Router::new(), |router, path| {
+        router.route(path, post(enterprise_feature))
+    })
+}
+
+async fn enterprise_feature() -> axum::response::Response {
+    crate::api::render(
+        axum::http::StatusCode::NOT_FOUND,
+        &serde_json::json!({
+            "status": 404,
+            "message": "This feature is not available in this edition",
+        }),
+    )
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(dashboard::index))
@@ -63,6 +98,16 @@ pub fn router() -> Router<AppState> {
                 .put(passwords::update_invitation)
                 .patch(passwords::update_invitation),
         )
+        .route("/templates_upload", post(crate::templates::uploads::create))
+        .route(
+            "/templates_upload/new",
+            get(crate::templates::uploads::new_from_url),
+        )
+        .route(
+            "/templates/{template_id}/documents",
+            post(crate::templates::uploads::create_documents),
+        )
+        .merge(enterprise_routes())
         .merge(crate::api::router())
         .route("/file/{signed_uuid}/{*filename}", get(crate::files::show))
         .route(
