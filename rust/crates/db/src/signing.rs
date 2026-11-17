@@ -2,7 +2,7 @@
 //! completion job (`ProcessSubmitterCompletionJob`).
 
 use chrono::NaiveDateTime;
-use sqlx::PgExecutor;
+use sqlx::{PgExecutor, PgPool};
 
 use crate::{DbError, JsonText, submissions::Submitter};
 
@@ -228,10 +228,10 @@ pub async fn insert_invited_submitter(
 ) -> Result<Submitter, DbError> {
     Ok(sqlx::query_as!(
         Submitter,
-        r#"INSERT INTO submitters (submission_id, account_id, uuid, email, phone, slug, values,
-                                   preferences, metadata, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, '{}', '{}', '{}',
-                   (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
+        r#"INSERT INTO submitters (submission_id, template_id, account_id, uuid, email, phone, slug,
+                                   values, preferences, metadata, created_at, updated_at)
+           VALUES ($1, (SELECT template_id FROM submissions WHERE id = $1), $2, $3, $4, $5, $6,
+                   '{}', '{}', '{}', (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
            RETURNING id, submission_id, uuid, email, slug, values AS "values: JsonText", ua, ip,
                      sent_at, opened_at, completed_at, created_at, updated_at, name, phone,
                      external_id, preferences AS "preferences: JsonText",
@@ -262,32 +262,41 @@ pub struct NewCompletedSubmitter<'a> {
 }
 
 /// Inserts the row unless the submitter has one; `is_first` marks the submission's first.
+/// Two parties completing at once both see no first row; the second insert then violates
+/// the partial unique index on `submission_id` and is retried, as Rails rescues
+/// `RecordNotUnique` and retries.
 pub async fn create_completed_submitter(
-    db: impl PgExecutor<'_>,
+    db: &PgPool,
     new: &NewCompletedSubmitter<'_>,
 ) -> Result<(), DbError> {
-    sqlx::query!(
-        r#"INSERT INTO completed_submitters
-             (submitter_id, submission_id, account_id, template_id, source, sms_count,
-              verification_method, completed_at, is_first, created_at, updated_at)
-           SELECT $1, $2, $3, $4, $5, $6, $7, $8,
-                  NOT EXISTS (SELECT 1 FROM completed_submitters
-                              WHERE submission_id = $2 AND is_first = true),
-                  (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc')
-           WHERE NOT EXISTS (SELECT 1 FROM completed_submitters WHERE submitter_id = $1)
-           ON CONFLICT DO NOTHING"#,
-        new.submitter_id,
-        new.submission_id,
-        new.account_id,
-        new.template_id,
-        new.source,
-        new.sms_count,
-        new.verification_method,
-        new.completed_at,
-    )
-    .execute(db)
-    .await?;
-    Ok(())
+    loop {
+        let inserted = sqlx::query!(
+            r#"INSERT INTO completed_submitters
+                 (submitter_id, submission_id, account_id, template_id, source, sms_count,
+                  verification_method, completed_at, is_first, created_at, updated_at)
+               SELECT $1, $2, $3, $4, $5, $6, $7, $8,
+                      NOT EXISTS (SELECT 1 FROM completed_submitters
+                                  WHERE submission_id = $2 AND is_first = true),
+                      (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc')
+               WHERE NOT EXISTS (SELECT 1 FROM completed_submitters WHERE submitter_id = $1)
+               ON CONFLICT (submitter_id) DO NOTHING"#,
+            new.submitter_id,
+            new.submission_id,
+            new.account_id,
+            new.template_id,
+            new.source,
+            new.sms_count,
+            new.verification_method,
+            new.completed_at,
+        )
+        .execute(db)
+        .await;
+        match inserted {
+            Err(sqlx::Error::Database(e))
+                if e.constraint() == Some("index_completed_submitters_on_submission_id") => {}
+            other => return other.map(|_| ()).map_err(Into::into),
+        }
+    }
 }
 
 /// `CompletedDocument.find_or_create_by!(sha256:, submitter_id:)`.
@@ -483,6 +492,37 @@ pub async fn find_start_form_submitter(
     .await?)
 }
 
+/// `StartFormSelfController#update`: the user's latest open submitter of the template's
+/// `self` submissions (`build_submitters_scope(exclude_completed: true, source: :self)`).
+pub async fn find_self_start_form_submitter(
+    db: impl PgExecutor<'_>,
+    template_id: i64,
+    email: &str,
+) -> Result<Option<Submitter>, DbError> {
+    Ok(sqlx::query_as!(
+        Submitter,
+        r#"SELECT r.id, r.submission_id, r.uuid, r.email, r.slug,
+                  r.values AS "values: JsonText", r.ua, r.ip, r.sent_at, r.opened_at,
+                  r.completed_at, r.created_at, r.updated_at, r.name, r.phone, r.external_id,
+                  r.preferences AS "preferences: JsonText",
+                  r.metadata AS "metadata: JsonText", r.account_id, r.declined_at,
+                  r.timezone, r.template_id
+           FROM submitters r
+           WHERE r.template_id = $1
+             AND r.submission_id IN (
+               SELECT s.id FROM submissions s
+               WHERE s.template_id = $1 AND s.archived_at IS NULL AND s.source = 'self'
+                 AND (s.expire_at IS NULL OR s.expire_at >= (now() AT TIME ZONE 'utc')))
+             AND r.declined_at IS NULL AND r.external_id IS NULL AND r.completed_at IS NULL
+             AND r.email = $2
+           ORDER BY r.id DESC LIMIT 1"#,
+        template_id,
+        email,
+    )
+    .fetch_optional(db)
+    .await?)
+}
+
 /// `StartFormResubmitController#find_or_initialize_submitter`: the open submitter with the
 /// slug of the `start_form_slug` cookie and the resubmitted party's email.
 pub async fn find_start_form_submitter_by_slug(
@@ -659,5 +699,65 @@ pub async fn latest_event_timestamp(
         event_type,
     )
     .fetch_optional(db)
+    .await?)
+}
+
+/// `DocumentMetadata.find_by(account_id:, blob_checksum:)&.text_runs` (JSON text).
+pub async fn document_metadata_text_runs(
+    db: impl PgExecutor<'_>,
+    account_id: i64,
+    blob_checksum: &str,
+) -> Result<Option<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT text_runs FROM document_metadata WHERE account_id = $1 AND blob_checksum = $2",
+        account_id,
+        blob_checksum
+    )
+    .fetch_optional(db)
+    .await?)
+}
+
+/// `DocumentMetadata.create!(account_id:, blob_checksum:, text_runs:)`. A concurrent insert
+/// of the same document wins (Rails retries the lookup on `RecordNotUnique`).
+pub async fn insert_document_metadata(
+    db: impl PgExecutor<'_>,
+    account_id: i64,
+    blob_checksum: &str,
+    text_runs: &str,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        r#"INSERT INTO document_metadata (account_id, blob_checksum, text_runs, created_at)
+           VALUES ($1, $2, $3, (now() AT TIME ZONE 'utc'))
+           ON CONFLICT (account_id, blob_checksum) DO NOTHING"#,
+        account_id,
+        blob_checksum,
+        text_runs
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// `record.touch` after an attachment is added (`touch_attachment_records`).
+pub async fn touch_submitter(db: impl PgExecutor<'_>, id: i64) -> Result<(), DbError> {
+    sqlx::query!(
+        "UPDATE submitters SET updated_at = (clock_timestamp() AT TIME ZONE 'utc') WHERE id = $1",
+        id
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// `CompletedDocument.exists?(sha256:)`.
+pub async fn completed_document_exists(
+    db: impl PgExecutor<'_>,
+    sha256: &str,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM completed_documents WHERE sha256 = $1) AS "exists!""#,
+        sha256
+    )
+    .fetch_one(db)
     .await?)
 }

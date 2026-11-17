@@ -98,6 +98,9 @@ def main():
         TEMPLATES[b]["single"] = clone(token, template_id, "Share Link", single, True)
         TEMPLATES[b]["multi"] = clone(token, template_id, "Share Link Multi", lambda s: None, True)
         TEMPLATES[b]["private"] = clone(token, template_id, "Private Link", lambda s: None, False)
+        TEMPLATES[b]["fields"] = clone(token, template_id, "Share Link Fields", single, True)
+        call(RAILS, token, "PUT", f"/api/templates/{TEMPLATES[b]['fields'][0]}",
+             {"preferences": {"link_form_fields": ["name", "email", "phone"]}})
 
     browsers = {b: Browser(BASES[b]) for b in BASES}
 
@@ -139,6 +142,17 @@ def main():
             FAILURES += 1
             print(f"FAIL {b}: another browser reopened the submitter")
     both("start two open parties", "POST", lambda b: f"/d/{slug(b, 'multi')}", start("visitor@example.com"))
+    # Without the requested details (`field_error_proc`).
+    both("start without email", "POST", lambda b: f"/d/{slug(b, 'single')}", start(""))
+    both("start with a blank email", "POST", lambda b: f"/d/{slug(b, 'single')}", start("  "))
+    both("start two open parties without email", "POST", lambda b: f"/d/{slug(b, 'multi')}", start(""))
+    both("start without email (German)", "POST", lambda b: f"/d/{slug(b, 'single')}?lang=de", start(""))
+    both("start all fields blank", "POST", lambda b: f"/d/{slug(b, 'fields')}",
+         lambda b, br: [("_method", "put"), ("authenticity_token", br.csrf), ("submitter[email]", ""),
+                        ("submitter[name]", " "), ("submitter[phone]", "")])
+    both("start without phone", "POST", lambda b: f"/d/{slug(b, 'fields')}",
+         lambda b, br: [("_method", "put"), ("authenticity_token", br.csrf), ("submitter[email]", "a@example.com"),
+                        ("submitter[name]", "A & B"), ("submitter[phone]", "")])
     both("start private", "POST", lambda b: f"/d/{slug(b, 'private')}", start("visitor@example.com"))
 
     # Complete the first submitter, then start again with its email.
@@ -162,7 +176,47 @@ def main():
          lambda b, br: [("_method", "put"), ("authenticity_token", br.csrf), ("resubmit", "nope")])
     del done
 
-    for name in ("single", "multi", "private"):
+    # Resubmitting a party whose `default_values` include an uploaded signature: the copy
+    # keeps the attachment uuid the values refer to.
+    from signing import signature_png
+    import base64
+    resubmitted = {}
+    for b in BASES:
+        tid = TEMPLATES[b]["single"][0]
+        _, tpl = call(RAILS, token, "GET", f"/api/templates/{tid}")
+        names = {f["name"]: f["uuid"] for f in tpl["fields"]}
+        status, created = call(RAILS, token, "POST", f"/api/templates/{tid}/submissions", {
+            "send_email": False,
+            "submitters": [{"role": "First Party", "email": "default-values@example.com",
+                            "values": {"Full Name": "Dee Fault",
+                                       "Signature": "data:image/png;base64," + base64.b64encode(signature_png()).decode()}},
+                           {"role": "Second Party", "email": "defined-party@example.com"}]})
+        assert status == 200, created
+        first = next(x for x in created if x["role"] == "First Party")
+        subprocess.run(["psql", DB, "-tAc", f"UPDATE submissions SET source = 'invite' WHERE id = {int(first['submission_id'])}"],
+                       check=True, capture_output=True)
+        status, body = call(RAILS, token, "PUT", f"/api/submitters/{first['id']}", {"completed": True})
+        assert status == 200, (status, body)
+        resubmitted[b] = first["slug"]
+        del names
+    both("default values completed page", "GET", lambda b: f"/s/{resubmitted[b]}/completed")
+    both("resubmit default values", "POST", lambda b: "/resubmit_form",
+         lambda b, br: [("_method", "put"), ("authenticity_token", br.csrf), ("resubmit", resubmitted[b])])
+    for b in BASES:
+        out = subprocess.run(["psql", DB, "-tAc", f"""
+            SELECT json_agg(json_build_array(a.uuid = ANY(SELECT a2.uuid FROM active_storage_attachments a2
+                                                           JOIN submitters r2 ON r2.id = a2.record_id
+                                                           WHERE r2.slug = '{resubmitted[b]}'),
+                                             a.blob_id, a.name) ORDER BY a.id)
+            FROM active_storage_attachments a JOIN submitters r ON r.id = a.record_id AND a.record_type = 'Submitter'
+            WHERE r.email = 'default-values@example.com' AND r.template_id = {int(TEMPLATES[b]['single'][0])}
+              AND r.completed_at IS NULL"""], capture_output=True, text=True, check=True).stdout.strip()
+        rows = json.loads(out or "null") or []
+        ok = len(rows) == 1 and rows[0][0] is True
+        print(f"{'ok  ' if ok else 'FAIL'} resubmit copies the attachment ({b}) {rows}")
+        FAILURES += not ok
+
+    for name in ("single", "multi", "private", "fields"):
         a, r = stored(TEMPLATES["rails"][name][0]), stored(TEMPLATES["rust"][name][0])
         if a == r:
             print(f"ok   stored submissions ({name})")

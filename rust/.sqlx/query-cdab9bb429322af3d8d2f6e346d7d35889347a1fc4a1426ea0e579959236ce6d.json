@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE submitters SET updated_at = (clock_timestamp() AT TIME ZONE 'utc') WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cdab9bb429322af3d8d2f6e346d7d35889347a1fc4a1426ea0e579959236ce6d"
+}

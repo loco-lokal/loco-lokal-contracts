@@ -539,12 +539,22 @@ pub struct Target<'a> {
     pub for_submitter_uuid: Option<&'a str>,
 }
 
+/// An attachment field's value that [`super::attachments::resolve`] turns into attachment
+/// uuids (`normalize_attachment_value`), in the order Rails normalizes them.
+#[derive(Clone, Debug)]
+pub struct Pending {
+    pub field_uuid: String,
+    pub field_type: String,
+    pub value: Value,
+}
+
 /// `NormalizeValues.call` with `add_fields: false`. Errors are the 422 messages.
+/// Attachment values are left as given and returned as [`Pending`].
 pub fn normalize(
     target: &Target<'_>,
     values: &Map<String, Value>,
     throw_errors: bool,
-) -> Result<Map<String, Value>, String> {
+) -> Result<(Map<String, Value>, Vec<Pending>), String> {
     let fields = fetch_fields(
         target.template_fields,
         target.template_submitters,
@@ -586,6 +596,7 @@ pub fn normalize(
     };
 
     let mut out = Map::new();
+    let mut pending = Vec::new();
     for (key, value) in values {
         if key.trim().is_empty() {
             continue;
@@ -611,15 +622,16 @@ pub fn normalize(
             }
             let Some(uuid) = uuid_of(field) else { continue };
             if ATTACHMENT_TYPES.contains(&field_type) && !blank(Some(value)) {
-                // Signature images and file downloads come with the signing flow (Phase 4).
-                return Err(format!(
-                    "Prefilling {field_type} fields is not supported yet"
-                ));
+                pending.push(Pending {
+                    field_uuid: uuid.clone(),
+                    field_type: field_type.to_owned(),
+                    value: value.clone(),
+                });
             }
             out.insert(uuid, normalize_value(field, value));
         }
     }
-    Ok(out)
+    Ok((out, pending))
 }
 
 #[cfg(test)]

@@ -89,3 +89,30 @@ pub fn set_encrypted(
         response.headers_mut().append(header::SET_COOKIE, value);
     }
 }
+
+/// `cookies.permanent.encrypted[name] = value`: 20 years, readable by scripts, `secure`
+/// only behind `FORCE_SSL` (`ActionDispatch::SSL`).
+pub fn set_permanent_encrypted(state: &AppState, response: &mut Response, name: &str, value: &str) {
+    let now = Utc::now();
+    // `20.years.from_now`
+    let expires = now
+        .checked_add_months(chrono::Months::new(240))
+        .unwrap_or(now);
+    let encrypted = state.secrets.cookie_encryptor.encrypt(
+        name,
+        &Value::String(value.to_owned()),
+        Some(expires),
+    );
+    let mut cookie = format!(
+        "{name}={}; path=/; expires={}",
+        utf8_percent_encode(&encrypted, COMPONENT),
+        expires.format("%a, %d %b %Y %H:%M:%S GMT"),
+    );
+    if state.config.force_ssl {
+        cookie.push_str("; secure");
+    }
+    cookie.push_str("; samesite=lax");
+    if let Ok(value) = HeaderValue::from_str(&cookie) {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+}

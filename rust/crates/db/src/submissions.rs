@@ -608,6 +608,7 @@ pub struct NewSubmitter {
     pub metadata: JsonText,
     pub preferences: JsonText,
     pub sent_at: Option<NaiveDateTime>,
+    pub completed_at: Option<NaiveDateTime>,
 }
 
 pub async fn insert_submitter(
@@ -618,8 +619,9 @@ pub async fn insert_submitter(
         Submitter,
         r#"INSERT INTO submitters
              (submission_id, template_id, account_id, uuid, slug, email, phone, name,
-              external_id, values, metadata, preferences, sent_at, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+              external_id, values, metadata, preferences, sent_at, completed_at, created_at,
+              updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                    (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
            RETURNING id, submission_id, uuid, email, slug, values AS "values: JsonText", ua, ip,
                      sent_at, opened_at, completed_at, created_at, updated_at, name, phone,
@@ -639,6 +641,7 @@ pub async fn insert_submitter(
         new.metadata as _,
         new.preferences as _,
         new.sent_at,
+        new.completed_at,
     )
     .fetch_one(db)
     .await?)
@@ -655,6 +658,7 @@ pub struct SubmitterUpdate {
     pub metadata: JsonText,
     pub preferences: JsonText,
     pub sent_at: Option<NaiveDateTime>,
+    pub completed_at: Option<NaiveDateTime>,
 }
 
 /// Saves the changes and bumps `updated_at` when anything changed.
@@ -667,12 +671,13 @@ pub async fn update_submitter(
         Submitter,
         r#"UPDATE submitters SET
              email = $2, name = $3, phone = $4, external_id = $5, values = $6, metadata = $7,
-             preferences = $8, sent_at = $9,
+             preferences = $8, sent_at = $9, completed_at = $10,
              updated_at = CASE
-               WHEN (email, name, phone, external_id, values, metadata, preferences, sent_at)
+               WHEN (email, name, phone, external_id, values, metadata, preferences, sent_at,
+                     completed_at)
                     IS NOT DISTINCT FROM
                     ($2::varchar, $3::varchar, $4::varchar, $5::varchar, $6::text, $7::text,
-                     $8::text, $9::timestamp)
+                     $8::text, $9::timestamp, $10::timestamp)
                THEN updated_at ELSE (now() AT TIME ZONE 'utc') END
            WHERE id = $1
            RETURNING id, submission_id, uuid, email, slug, values AS "values: JsonText", ua, ip,
@@ -689,6 +694,7 @@ pub async fn update_submitter(
         changes.metadata as _,
         changes.preferences as _,
         changes.sent_at,
+        changes.completed_at,
     )
     .fetch_one(db)
     .await?)
@@ -721,8 +727,8 @@ pub async fn update_snapshots(
     Ok(())
 }
 
-/// `EmailMessages.find_or_create_for_account_user` without asset extraction: the
-/// message with this subject and body, by `sha1`. Returns its uuid.
+/// `EmailMessages.find_or_create_for_account_user`: the message with this subject and
+/// body, by `sha1`, created with its extracted `(sha1, data)` assets. Returns its uuid.
 pub async fn find_or_create_email_message(
     db: impl PgExecutor<'_> + Copy,
     account_id: i64,
@@ -730,6 +736,7 @@ pub async fn find_or_create_email_message(
     subject: &str,
     body: &str,
     sha1: &str,
+    assets: &[(String, String)],
 ) -> Result<String, DbError> {
     if let Some(uuid) = sqlx::query_scalar!(
         "SELECT uuid FROM email_messages WHERE account_id = $1 AND sha1 = $2 ORDER BY id LIMIT 1",
@@ -741,7 +748,7 @@ pub async fn find_or_create_email_message(
     {
         return Ok(uuid);
     }
-    Ok(sqlx::query_scalar!(
+    let uuid = sqlx::query_scalar!(
         r#"INSERT INTO email_messages
              (account_id, author_id, subject, body, sha1, uuid, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
@@ -754,7 +761,21 @@ pub async fn find_or_create_email_message(
         uuid::Uuid::new_v4().to_string(),
     )
     .fetch_one(db)
-    .await?)
+    .await?;
+    // `save_new_assets!`: existing assets of the account are kept.
+    for (asset_sha1, data) in assets {
+        sqlx::query!(
+            r#"INSERT INTO email_message_assets (account_id, data, sha1, created_at, updated_at)
+               VALUES ($1, $2, $3, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
+               ON CONFLICT (account_id, sha1) DO NOTHING"#,
+            account_id,
+            data,
+            asset_sha1
+        )
+        .execute(db)
+        .await?;
+    }
+    Ok(uuid)
 }
 
 /// An account's email message by uuid: `(subject, body)`.

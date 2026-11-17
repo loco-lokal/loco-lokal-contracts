@@ -272,7 +272,7 @@ async fn update_submitter(
             .and_then(Value::as_str)
             .map(str::to_owned);
         form.submitter.values = progress.values.clone();
-        match assign_completed_values(state, form, now, validate_required).await? {
+        match assign_completed_values(state, form, now, Some(validate_required)).await? {
             Ok(values) => progress.values = JsonText(Value::Object(values)),
             Err(err) => return Ok(Err(err)),
         }
@@ -345,12 +345,13 @@ fn event_data(request: &RequestInfo) -> Map<String, Value> {
 }
 
 /// `assign_completed_attributes`: default, formula and date values, condition filtering,
-/// and the required-field check. Returns the final values.
-async fn assign_completed_values(
+/// and the required-field check (none for `None`, as the API completes submitters).
+/// Returns the final values.
+pub(crate) async fn assign_completed_values(
     state: &AppState,
     form: &Form,
     completed_at: NaiveDateTime,
-    validate_required: bool,
+    validate_required: Option<bool>,
 ) -> Result<Result<Map<String, Value>, SubmitError>, AppError> {
     let values = match merge_default_values(state, form, completed_at).await? {
         Ok(values) => values,
@@ -429,6 +430,9 @@ async fn assign_completed_values(
         }
     }
 
+    let Some(validate_required) = validate_required else {
+        return Ok(Ok(values));
+    };
     let index = rules::fields_uuid_index(fields);
     for uuid in &required {
         if present(values.get(uuid)) {
@@ -464,6 +468,14 @@ async fn merge_default_values(
             .unwrap_or_default();
         match field.get("type").and_then(Value::as_str) {
             Some("stamp") => {
+                // The API completing a recipient it is still creating: the stamp would be
+                // attached before the submitter has an id.
+                if form.submitter.id == 0 {
+                    return Ok(Err(SubmitError::Invalid(
+                        "Stamp fields of submitters completed on creation are not supported yet"
+                            .into(),
+                    )));
+                }
                 // `acc[field['uuid']] ||= CreateStampAttachment.build_attachment(...).uuid`.
                 let with_logo = field.get("preferences").and_then(|p| p.get("with_logo"))
                     != Some(&Value::Bool(false));
@@ -527,7 +539,11 @@ pub fn default_value_for(
     }
     let role = form.role(&submitter.uuid);
     let mut attrs = Map::new();
-    attrs.insert("submission_id".into(), json!(submitter.submission_id));
+    // An unsaved submission (the API completing a recipient it creates) has no id yet.
+    attrs.insert(
+        "submission_id".into(),
+        json!((submitter.submission_id != 0).then_some(submitter.submission_id)),
+    );
     attrs.insert("email".into(), json!(submitter.email));
     attrs.insert("phone".into(), json!(submitter.phone));
     attrs.insert("name".into(), json!(submitter.name));
@@ -643,7 +659,7 @@ fn pending_invite(form: &Form) -> bool {
 
 /// `maybe_invite_via_field`: parties whose email or phone comes from this submitter's
 /// field are created.
-async fn invite_via_field(
+pub(crate) async fn invite_via_field(
     tx: &mut loco_db::PgConnection,
     state: &AppState,
     form: &Form,
