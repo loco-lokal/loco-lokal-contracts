@@ -23,6 +23,12 @@ the search entry. The preview PNGs must have the same size, bit depth, palette s
 chunks; their pixels are compared with a tolerance, since the `PDFium` builds differ and
 uploaded images are resized with another filter.
 
+The PDF fixtures cover the branches of `Templates::FindPdfiumAcroFields` (field types,
+grouping of widgets, export values and `/Opt`, detached widgets, rotated and offset pages)
+and of `Templates::BuildPdfiumAnnotations` (the link limit, other actions and URIs).
+`UPLOADS_EXTRA_PDFS` (paths separated by `:`) adds uploads of other PDFs, such as forms
+found in the wild.
+
 Word documents, ZIP archives and uploads from a URL are not ported: Rust must answer them
 with 422 "… is not supported yet". The created templates are deleted at the end.
 """
@@ -85,7 +91,7 @@ def rails_runner(code):
 
 def psql_json(sql):
     out = subprocess.run(["psql", DATABASE_URL, "-Atc", sql], check=True, capture_output=True, text=True)
-    return json.loads(out.stdout or "null")
+    return json.loads(out.stdout.strip() or "null")
 
 
 def multipart(fields, files):
@@ -206,10 +212,30 @@ def pixel_difference(a, b):
     return mean, off
 
 
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def number_uuids(value):
+    """Replaces each uuid with its order of first appearance, so that references (an
+    area's `option_uuid`, `attachment_uuid`, `submitter_uuid`) are compared too."""
+    numbers = {}
+
+    def walk(item):
+        if isinstance(item, dict):
+            return {k: walk(v) for k, v in item.items()}
+        if isinstance(item, list):
+            return [walk(v) for v in item]
+        if isinstance(item, str):
+            return UUID.sub(lambda m: f"<uuid {numbers.setdefault(m.group(0), len(numbers))}>", item)
+        return item
+
+    return walk(value)
+
+
 def compare_templates(label, rails_id, rust_id, encrypted=False):
     rails_template, rails_docs = stored(rails_id)
     rust_template, rust_docs = stored(rust_id)
-    same(f"{label}: template row", scrub(rails_template), scrub(rust_template))
+    same(f"{label}: template row", scrub(number_uuids(rails_template)), scrub(number_uuids(rust_template)))
 
     def rows(docs):
         out = []
@@ -262,7 +288,7 @@ def response(result):
         body = page(body)
     else:
         try:
-            body = json.dumps(volatile(json.loads(body)), indent=1, ensure_ascii=False)
+            body = json.dumps(number_uuids(volatile(json.loads(body))), indent=1, ensure_ascii=False)
         except ValueError:
             pass
         body = json_text(body)
@@ -335,6 +361,14 @@ def main():
     created = {}
     created["form"] = upload_case(sessions, users, "PDF form", [pdf("form.pdf")])
     upload_case(sessions, users, "PDF links", [pdf("links.pdf")])
+    upload_case(sessions, users, "AcroForm fields", [pdf("acro_fields.pdf")])
+    upload_case(sessions, users, "widgets without a form", [pdf("orphan_widgets.pdf")])
+    upload_case(sessions, users, "widgets without a form, with a form XObject", [pdf("orphan_xobject.pdf")])
+    upload_case(sessions, users, "260 links and other actions", [pdf("many_links.pdf")])
+    upload_case(sessions, users, "two PDF forms", [pdf("form.pdf"), pdf("acro_fields.pdf")])
+    for path in filter(None, os.environ.get("UPLOADS_EXTRA_PDFS", "").split(os.pathsep)):
+        upload_case(sessions, users, f"extra PDF {Path(path).name}",
+                    [("files[]", Path(path).name, "application/pdf", Path(path).read_bytes())])
     upload_case(sessions, users, "18-page PDF", [pdf("pages.pdf")])
     upload_case(sessions, users, "PNG", [image("color.png", "image/png")])
     upload_case(sessions, users, "grayscale PNG", [image("gray.png", "image/png")])
@@ -359,6 +393,9 @@ def main():
         both(sessions, "documents: PDF and PNG", lambda n: f"/templates/{ids[n]}/documents",
              files=[pdf("form.pdf"), image("color.png", "image/png")], json_response=True)
         compare_templates("documents: added", ids["rails"], ids["rust"])
+        both(sessions, "documents: AcroForm fields and links", lambda n: f"/templates/{ids[n]}/documents",
+             files=[pdf("acro_fields.pdf"), pdf("many_links.pdf")], json_response=True)
+        compare_templates("documents: AcroForm fields and links added", ids["rails"], ids["rust"])
         both(sessions, "documents: missing file", lambda n: f"/templates/{ids[n]}/documents",
              json_response=True)
         both(sessions, "documents: encrypted PDF", lambda n: f"/templates/{ids[n]}/documents",

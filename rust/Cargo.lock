@@ -1887,6 +1887,7 @@ dependencies = [
  "flate2",
  "harfrust",
  "image",
+ "loco-rails-compat",
  "lopdf",
  "p12-keystore",
  "pdfium-render",

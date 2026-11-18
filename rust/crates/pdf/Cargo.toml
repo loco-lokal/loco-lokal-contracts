@@ -29,4 +29,5 @@ x509-parser = "0.18.1"
 workspace = true
 
 [dev-dependencies]
+loco-rails-compat = { version = "0.1.0", path = "../rails-compat" }
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
