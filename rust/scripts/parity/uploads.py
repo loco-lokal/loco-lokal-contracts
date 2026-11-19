@@ -85,7 +85,7 @@ def rails_runner(code):
 
 def psql_json(sql):
     out = subprocess.run(["psql", DATABASE_URL, "-Atc", sql], check=True, capture_output=True, text=True)
-    return json.loads(out.stdout or "null")
+    return json.loads(out.stdout.strip() or "null")
 
 
 def multipart(fields, files):
