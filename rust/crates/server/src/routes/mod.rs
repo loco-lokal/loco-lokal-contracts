@@ -107,6 +107,10 @@ pub fn router() -> Router<AppState> {
             "/templates/{template_id}/documents",
             post(crate::templates::uploads::create_documents),
         )
+        .route(
+            "/templates/{template_id}/detect_fields",
+            post(crate::templates::detect_fields::create),
+        )
         .merge(enterprise_routes())
         .merge(crate::api::router())
         .route("/file/{signed_uuid}/{*filename}", get(crate::files::show))

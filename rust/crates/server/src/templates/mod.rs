@@ -5,6 +5,7 @@
 //! Not supported yet (422 before anything is stored): ZIP archives, Word documents (Rails
 //! converts them with the closed-source `WordCraft` gem) and uploads from a URL.
 
+pub mod detect_fields;
 pub mod previews;
 pub mod uploads;
 

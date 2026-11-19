@@ -218,6 +218,13 @@ jobs:
         run: scripts/fetch-pdfium.sh
       - name: Fetch fonts
         run: scripts/fetch-fonts.sh
+      - name: Cache ONNX model and runtime
+        uses: actions/cache@v4
+        with:
+          path: rust/vendor/onnx
+          key: ${{ runner.os }}-onnx-${{ hashFiles('rust/scripts/fetch-onnx.sh') }}
+      - name: Fetch ONNX model and runtime
+        run: scripts/fetch-onnx.sh
       - name: Load baseline schema and Rust-owned tables
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f schema/baseline.sql

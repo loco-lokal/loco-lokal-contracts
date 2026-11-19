@@ -214,7 +214,7 @@ async fn generate_preview(
 /// `load_and_authorize_resource :template` for a nested controller: the template of
 /// `params[:template_id]`, which the user must be able to read. Unknown templates are
 /// 404s; others redirect to `/` with `CanCan`'s message.
-async fn readable_template(
+pub(crate) async fn readable_template(
     state: &AppState,
     auth: &Auth,
     session: &Session,

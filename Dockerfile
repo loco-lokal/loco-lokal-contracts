@@ -9,6 +9,7 @@ RUN apk --no-cache add wget unzip && \
     wget https://raw.githubusercontent.com/impallari/DancingScript/master/OFL.txt && \
     wget https://raw.githubusercontent.com/notofonts/noto-fonts/refs/heads/main/LICENSE && \
     wget -O /model.onnx "https://github.com/docusealco/fields-detection/releases/download/2.0.0/model_704_int8.onnx" && \
+    echo "a0a92ef7f50b6e5c707b7da9c59977bc7c9e9d8f85542bd75169c693f5efa4da  /model.onnx" | sha256sum -c - && \
     wget -O pdfium-linux.zip "https://github.com/docusealco/pdfium-binaries/releases/download/20260920/pdfium-musl-$(uname -m).zip" && \
     case "$(uname -m)" in \
       x86_64)  echo "bbca8a648dbd1ba81f9c6c223f21dc394cf1ad381c6c17d60c6dcc4a7d3a2ae0  pdfium-linux.zip" ;; \

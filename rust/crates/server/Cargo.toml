@@ -18,6 +18,7 @@ chrono-tz = "0.10.4"
 reqwest = "0.13.5"
 hex = "0.4.3"
 loco-db = { version = "0.1.0", path = "../db" }
+loco-detect = { version = "0.1.0", path = "../detect" }
 loco-domain = { version = "0.1.0", path = "../domain" }
 loco-jobs = { version = "0.1.0", path = "../jobs" }
 loco-mailer = { version = "0.1.0", path = "../mailer" }
