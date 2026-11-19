@@ -25,24 +25,22 @@ def save(doc)
   io.string
 end
 
-def blank(canvas, label, x, y, underscores: 30, size: 11, font: 'Helvetica')
-  canvas.font(font, size:).text("#{label} #{'_' * underscores}", at: [x, y])
+def blank(canvas, label, left, bottom, underscores: 30, size: 11, font: 'Helvetica')
+  canvas.font(font, size:).text("#{label} #{'_' * underscores}", at: [left, bottom])
 end
 
-def ruled(canvas, label, x, y, length: 200, size: 11)
-  canvas.font('Helvetica', size:).text(label, at: [x, y])
+def ruled(canvas, label, left, bottom, length: 200, size: 11)
+  canvas.font('Helvetica', size:).text(label, at: [left, bottom])
   width = canvas.font.decode_utf8(label).sum { |g| g.width * size / 1000.0 }
-  canvas.line_width(0.8).line(x + width + 6, y - 2, x + width + 6 + length, y - 2).stroke
+  canvas.line_width(0.8).line(left + width + 6, bottom - 2, left + width + 6 + length, bottom - 2).stroke
 end
 
-def checkbox(canvas, label, x, y, size: 10)
-  canvas.line_width(0.8).rectangle(x, y - 1, size, size).stroke
-  canvas.font('Helvetica', size: 11).text(label, at: [x + size + 5, y])
+def checkbox(canvas, label, left, bottom, size: 10)
+  canvas.line_width(0.8).rectangle(left, bottom - 1, size, size).stroke
+  canvas.font('Helvetica', size: 11).text(label, at: [left + size + 5, bottom])
 end
 
-def form_page(doc, form)
-  page = doc.pages.add
-  canvas = page.canvas
+def form_blanks(canvas)
   canvas.font('Helvetica', variant: :bold, size: 16).text('Application Form', at: [50, 750])
   canvas.font('Helvetica', size: 10).text('Please fill in all fields in block capitals.', at: [50, 732])
 
@@ -53,14 +51,18 @@ def form_page(doc, form)
   blank(canvas, 'Quantity:', 300, 650, underscores: 12)
   ruled(canvas, 'Email', 50, 620, length: 230)
   ruled(canvas, 'Address', 50, 595, length: 420)
+end
 
+def form_options(canvas)
   canvas.font('Helvetica', variant: :bold, size: 12).text('Options', at: [50, 560])
   checkbox(canvas, 'Yes', 50, 540)
   checkbox(canvas, 'No', 110, 540)
   checkbox(canvas, 'Maybe later', 170, 540)
   checkbox(canvas, 'I agree to the terms and conditions', 50, 520)
+end
 
-  # A table: header row, three rows to fill in.
+# A table: header row, three rows to fill in.
+def form_table(canvas)
   top = 480
   canvas.line_width(0.6)
   [50, 250, 400, 550].each { |x| canvas.line(x, top, x, top - 100).stroke }
@@ -69,6 +71,14 @@ def form_page(doc, form)
   canvas.text('Item', at: [55, top - 17])
   canvas.text('Menge', at: [255, top - 17])
   canvas.text('Preis', at: [405, top - 17])
+end
+
+def form_page(doc, form)
+  page = doc.pages.add
+  canvas = page.canvas
+  form_blanks(canvas)
+  form_options(canvas)
+  form_table(canvas)
 
   blank(canvas, 'Unterschrift:', 50, 330, underscores: 25)
   blank(canvas, 'Datum', 330, 330, underscores: 18)
