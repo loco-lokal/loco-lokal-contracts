@@ -253,7 +253,7 @@ Field detection (`POST /templates/:id/detect_fields`, issue #11) ports `Template
 - The response is the same server-sent event stream, one `{attachment_uuid, page, fields}` event per page and then `{completed: true}`. As with `ActionController::Live`, an error ends the stream without `completed`, and signed-out requests get the 500 page.
 - `scripts/fetch-onnx.sh` provides the model and runtime for development and CI. The Dockerfile now checks the model's checksum.
 
-`detect_fields.py` compares the event streams with Rails' for whole templates, single pages, image documents, parameter variants, errors in the stream and authorization. `crates/detect/tests/golden.rs` checks the fields against Rails' output for fixture files. ONNX Runtime picks kernels by CPU, so coordinates there are compared to 1e-4.
+`detect_fields.py` compares the event streams with Rails' for whole templates, single pages, image documents, parameter variants, errors in the stream and authorization. `crates/detect/tests/golden.rs` checks the fields against Rails' output for fixture files. ONNX Runtime picks its int8 kernels by CPU, so there each box only has to overlap Rails' by an intersection over union of at least 0.95; the number, order and types of the fields are compared exactly, and the fixtures' detections score well clear of the confidence thresholds.
 
 These parts return 422 ("not supported yet") or are still missing:
 
