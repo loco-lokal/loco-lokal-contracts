@@ -49,7 +49,7 @@ cd rust && sqlx migrate run --source migrations
 
 ## Golden fixtures
 
-`crates/rails-compat/tests/fixtures/golden.json` holds values that Rails produced with the dev `SECRET_KEY_BASE`: encrypted columns, signed ids, an encrypted SMTP config, and a bcrypt hash. Tests check that Rust reads and writes the same formats. To regenerate the file, with the `rails` service running:
+`crates/rails-compat/tests/fixtures/golden.json` holds values that Rails produced with the dev `SECRET_KEY_BASE`: encrypted columns, signed ids, an encrypted SMTP config, and a bcrypt hash. Tests check that Rust reads and writes the same formats. `crates/pdf/tests/fixtures/upload-golden.json` holds the form fields and links Rails extracts from the `upload-*.pdf` fixtures (the PDFs of `uploads_seed.rb`). To regenerate the files, with the `rails` service running:
 
 ```sh
 rust/scripts/generate-golden.sh
@@ -128,7 +128,7 @@ cd rust/scripts/parity
 ./previews.py                                        # /preview/:signed_key/:page, /templates/:id/preview, documents_page_objects (seeds its own template)
 ```
 
-`uploads.py` signs in on both servers as a user that `uploads_seed.rb` creates with a known password, and uploads PDFs (form fields, links, 18 pages, a password) and images that the seed builds with HexaPDF and libvips. It needs Pillow, and reads the stored previews through the `rails` service.
+`uploads.py` signs in on both servers as a user that `uploads_seed.rb` creates with a known password, and uploads PDFs (form fields, links, 18 pages, a password) and images that the seed builds with HexaPDF and libvips. It needs Pillow, and reads the stored previews through the `rails` service. `UPLOADS_EXTRA_PDFS` (paths separated by `:`) adds uploads of more PDFs, such as forms found in the wild.
 
 `signing.py` compares HTML pages after normalizing tokens, nonces, slugs, origins and indentation; pack tags differ because the Rust server reads the dev asset manifest. `signing.py`, `emails.py` and `webhooks.py` need both job workers: Sidekiq runs inside the `rails` service, and the Rust server needs `JOB_CONCURRENCY` > 0. For the email check, the Rust server needs the same SMTP settings as the `rails` service (`SMTP_ADDRESS=localhost SMTP_PORT=1025 SMTP_ENABLE_STARTTLS=false SMTP_FROM='Contracts <contracts@example.com>'`). `webhooks.py` listens on this machine's `en0` address (`HOOK_HOST`/`HOOK_PORT` override it), which both servers can reach.
 
@@ -225,12 +225,22 @@ Issue #7 ports the remaining signing-form endpoints and API gaps:
 Template uploads port `TemplatesUploadsController#create` (`POST /templates_upload`), `TemplateDocumentsController#create` (`POST /templates/:id/documents`), `Templates::CreateAttachments` and `Templates::ProcessDocument` (`templates/`, `loco_pdf::upload`):
 
 - PDFs and images (PNG, JPEG, ICO, BMP; other image types fail as in Rails). Password-protected PDFs get the password prompt and are stored decrypted.
-- Form fields extracted from the PDF (`Templates::FindPdfiumAcroFields`), and its `http(s)` links in `metadata.pdf.annotations` (`Templates::BuildPdfiumAnnotations`).
+- Form fields extracted from the PDF (`Templates::FindPdfiumAcroFields`), and its `http(s)` links in `metadata.pdf.annotations` (`Templates::BuildPdfiumAnnotations`). See the AcroForm detection paragraph below.
 - Blob and attachment rows with Rails' metadata, key order included. Uploaded files are identified by content, as Marcel does.
 - `preview_images`: up to 16 pages, with select placeholders hidden and form fields flattened, rendered 1400 px wide. They are written as libvips writes them: quantized by libimagequant 4.2.2 (the version in Rails' image) to a 2-, 4- or 8-bit palette, with the same `eXIf` and `pHYs` chunks. Images are turned upright and scaled to 1400 px.
 - The `template.created` webhook and the search entry. A failed upload keeps the template and documents created so far, as in Rails.
 - `Templates::BuildImagePagePdf` (`loco_pdf::image_page`), byte for byte. Nothing calls it yet; Rails uses it to edit documents in the template builder.
 - `POST /api/templates` does not exist in this edition: like Rails, the Rust server answers 404, and `{"message": "This feature is not available in this edition"}` for `/api/templates/pdf`, `…/docx` and the other enterprise paths. Unrouted methods now answer 404 instead of 405, and unrouted paths pick HTML or JSON from the `Accept` header, as `ErrorsController` does.
+
+AcroForm field detection (issue #10, `loco_pdf::upload`) gives the same fields and links as Rails:
+
+- Field types: text, cells (comb fields with `MaxLen`, as `cell_w`), dates (`AFDate_` actions, with the format from the format or keystroke script), checkboxes, radio groups (from `/Opt` or from the export values; numeric and single export values become empty options; an `/Opt` that does not match the widgets is replaced with empty options), selects (combo boxes without placeholders; the value only counts when the appearance draws it), signatures and initials. List boxes and push buttons are skipped, and so are fields with a default value.
+- Areas: widgets grouped into fields as Rails groups them (by field, by widget for detached widgets and unnamed fields), ordered by control index, on rotated pages and on media and crop boxes that do not start at 0,0. Zero-sized widgets are dropped.
+- Names, descriptions (`TU`), `required`, alignment (`Q`), and widgets that are not in the form's field tree (read from their own dictionary when the file has an AcroForm or contains `/Form`).
+- Links: `http(s)` URIs only, with the 250-link limit checked before each page, as in Rails (so a page can take the count past 250).
+- Rails' `PDFium` build reads checkbox and radio states and export values through its own "raw" functions; the Rust server loads the page's form view so that the standard functions return the same values.
+
+`uploads.py` compares these through uploads and added documents, including the HexaPDF fixtures for each branch and, with `UPLOADS_EXTRA_PDFS`, real forms (IRS W-9, W-4, W-8BEN, 1040, 4506-T, SS-4, 8822, GSA SF1449, OPM SF2809 matched). `crates/pdf/tests/upload.rs` checks the fixtures against Rails' stored JSON, float digits included. The other callers of the detection (replacing documents with `clone_and_replace`, MCP's `create_template` and the template builder's document edits) are ported with their endpoints (#12, #21).
 
 Preview pages of PDFs come out pixel for pixel as in Rails, although the two `PDFium` builds differ. Rails' build reads checkbox and radio states through its own "raw" functions; the Rust server loads the page's form view instead, so the standard functions see them too. Previews of uploaded images differ slightly (mean difference below 0.3 of 255), because `image`'s filters replace libvips' resize, so their palettes can have a few more or fewer colors. The PNG compression differs as well, so preview byte sizes and checksums are not the same as Rails'.
 
