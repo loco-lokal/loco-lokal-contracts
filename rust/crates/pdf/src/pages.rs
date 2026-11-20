@@ -17,8 +17,9 @@
 use std::cmp::Ordering;
 
 use pdfium_render::prelude::{
-    FPDF_DOCUMENT, FPDF_FORMFILLINFO, FPDF_FORMHANDLE, FPDF_PAGE, FPDF_PAGEOBJECT, FS_MATRIX,
-    FS_RECTF, Pdfium, PdfiumLibraryBindings, PdfiumLibraryBindingsAccessor,
+    FPDF_DOCUMENT, FPDF_FILEWRITE, FPDF_FONT, FPDF_FORMFILLINFO, FPDF_FORMHANDLE, FPDF_PAGE,
+    FPDF_PAGEOBJECT, FS_MATRIX, FS_RECTF, FS_SIZEF, Pdfium, PdfiumLibraryBindings,
+    PdfiumLibraryBindingsAccessor,
 };
 
 const FPDF_ANNOT: i32 = 0x01;
@@ -31,6 +32,7 @@ const FPDF_PAGEOBJ_FORM: i32 = 5;
 const FLAT_NORMALDISPLAY: i32 = 0;
 const FLATTEN_FAIL: i32 = 0;
 const FLATTEN_SUCCESS: i32 = 1;
+const FPDF_NO_INCREMENTAL: std::ffi::c_ulong = 2;
 /// `Pdfium::MAX_SIZE`.
 const MAX_SIZE: i64 = 32_767;
 /// `Templates::ProcessDocument::MAX_WIDTH`.
@@ -179,16 +181,21 @@ pub fn page_objects(pdfium: &Pdfium, bytes: &[u8], page_index: i64) -> Result<Pa
 }
 
 /// `Pdfium::Document` with its form fill environment.
-struct Document<'a> {
-    bindings: &'a dyn PdfiumLibraryBindings,
-    doc: FPDF_DOCUMENT,
+pub(crate) struct Document<'a> {
+    pub(crate) bindings: &'a dyn PdfiumLibraryBindings,
+    pub(crate) doc: FPDF_DOCUMENT,
     form: FPDF_FORMHANDLE,
     // Must outlive `form`.
     _form_info: Box<FPDF_FORMFILLINFO>,
+    /// `standard_font`: Helvetica, loaded once per document.
+    standard_font: std::cell::Cell<FPDF_FONT>,
 }
 
 impl<'a> Document<'a> {
-    fn open(bindings: &'a dyn PdfiumLibraryBindings, bytes: &'a [u8]) -> Result<Self, String> {
+    pub(crate) fn open(
+        bindings: &'a dyn PdfiumLibraryBindings,
+        bytes: &'a [u8],
+    ) -> Result<Self, String> {
         // SAFETY: `bytes` outlives the document, which is closed on drop; the form fill
         // info is boxed and freed after the form handle is closed.
         unsafe {
@@ -199,20 +206,137 @@ impl<'a> Document<'a> {
                     "Failed to load document from memory (Code: {code})"
                 ));
             }
+            Ok(Self::with_form(bindings, doc))
+        }
+    }
+
+    /// `Pdfium::Document.create`: an empty document.
+    pub(crate) fn create(bindings: &'a dyn PdfiumLibraryBindings) -> Result<Self, String> {
+        // SAFETY: the new document is closed on drop.
+        unsafe {
+            let doc = bindings.FPDF_CreateNewDocument();
+            if doc.is_null() {
+                let code = bindings.FPDF_GetLastError();
+                return Err(format!("Failed to create new document (Code: {code})"));
+            }
+            Ok(Self::with_form(bindings, doc))
+        }
+    }
+
+    /// `init_form_fill_environment`.
+    ///
+    /// # Safety
+    /// `doc` is an open document this struct takes over.
+    unsafe fn with_form(bindings: &'a dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT) -> Self {
+        // SAFETY: the form fill info is boxed and freed after the form handle is closed.
+        unsafe {
             let mut form_info: Box<FPDF_FORMFILLINFO> = Box::new(std::mem::zeroed());
             form_info.version = 2;
             let form = bindings.FPDFDOC_InitFormFillEnvironment(doc, &raw mut *form_info);
-            Ok(Self {
+            Self {
                 bindings,
                 doc,
                 form,
                 _form_info: form_info,
-            })
+                standard_font: std::cell::Cell::new(std::ptr::null_mut()),
+            }
         }
     }
 
+    /// `page_size(page_index)`: `FPDF_GetPageSizeByIndexF`.
+    pub(crate) fn page_size(&self, page_index: i32) -> Option<(f32, f32)> {
+        let mut size = FS_SIZEF {
+            width: 0.0,
+            height: 0.0,
+        };
+        // SAFETY: an open document and a size to fill.
+        let ok = unsafe {
+            self.bindings
+                .FPDF_GetPageSizeByIndexF(self.doc, page_index, &raw mut size)
+        };
+        (ok == 1).then_some((size.width, size.height))
+    }
+
+    /// `import_pages(src_doc, pages:, index:)`, without `FPDF_ImportAcroForm` (Rails'
+    /// `PDFium` build only; see [`crate::acroform`]).
+    pub(crate) fn import_pages(
+        &self,
+        source: &Document<'_>,
+        pages: &str,
+        index: i32,
+    ) -> Result<(), String> {
+        // SAFETY: both documents are open.
+        let ok = unsafe {
+            self.bindings
+                .FPDF_ImportPages(self.doc, source.doc, pages, index)
+        };
+        if ok == 0 {
+            return Err("Failed to import pages".into());
+        }
+        Ok(())
+    }
+
+    /// `save(io)` with `FPDF_NO_INCREMENTAL`.
+    pub(crate) fn save(&self) -> Result<Vec<u8>, String> {
+        #[repr(C)]
+        struct Writer {
+            base: FPDF_FILEWRITE,
+            out: Vec<u8>,
+        }
+
+        unsafe extern "C" fn write_block(
+            this: *mut FPDF_FILEWRITE,
+            data: *const std::ffi::c_void,
+            size: std::ffi::c_ulong,
+        ) -> std::ffi::c_int {
+            // SAFETY: `this` is the `base` of a `Writer` (first field, `repr(C)`), and
+            // `data` points to `size` bytes.
+            unsafe {
+                let writer = &mut *this.cast::<Writer>();
+                let len = usize::try_from(size).unwrap_or(0);
+                writer
+                    .out
+                    .extend_from_slice(std::slice::from_raw_parts(data.cast::<u8>(), len));
+            }
+            1
+        }
+
+        let mut writer = Writer {
+            base: FPDF_FILEWRITE {
+                version: 1,
+                WriteBlock: Some(write_block),
+            },
+            out: Vec::new(),
+        };
+        // SAFETY: `writer` lives until `FPDF_SaveAsCopy` returns.
+        let ok = unsafe {
+            self.bindings.FPDF_SaveAsCopy(
+                self.doc,
+                (&raw mut writer).cast::<FPDF_FILEWRITE>(),
+                FPDF_NO_INCREMENTAL,
+            )
+        };
+        if ok == 0 {
+            return Err("Failed to save document".into());
+        }
+        Ok(writer.out)
+    }
+
+    /// `standard_font`: `FPDFText_LoadStandardFont(doc, 'Helvetica')`, memoized.
+    pub(crate) fn standard_font(&self) -> FPDF_FONT {
+        if self.standard_font.get().is_null() {
+            // SAFETY: an open document.
+            let font = unsafe {
+                self.bindings
+                    .FPDFText_LoadStandardFont(self.doc, "Helvetica")
+            };
+            self.standard_font.set(font);
+        }
+        self.standard_font.get()
+    }
+
     /// `doc.get_page(index)`.
-    fn page(&self, page_index: i64) -> Result<Page<'_>, String> {
+    pub(crate) fn page(&self, page_index: i64) -> Result<Page<'_>, String> {
         // SAFETY: an open document.
         let count = i64::from(unsafe { self.bindings.FPDF_GetPageCount(self.doc) });
         let index = i32::try_from(page_index)
@@ -237,6 +361,9 @@ impl Drop for Document<'_> {
             if !self.form.is_null() {
                 self.bindings.FPDFDOC_ExitFormFillEnvironment(self.form);
             }
+            if !self.standard_font.get().is_null() {
+                self.bindings.FPDFFont_Close(self.standard_font.get());
+            }
             self.bindings.FPDF_CloseDocument(self.doc);
         }
     }
@@ -247,15 +374,15 @@ type Getter =
 type Setter = unsafe fn(&dyn PdfiumLibraryBindings, FPDF_PAGE, f32, f32, f32, f32);
 
 /// `Pdfium::Page`.
-struct Page<'d> {
-    doc: &'d Document<'d>,
+pub(crate) struct Page<'d> {
+    pub(crate) doc: &'d Document<'d>,
     index: i32,
-    ptr: FPDF_PAGE,
+    pub(crate) ptr: FPDF_PAGE,
     view_loaded: bool,
 }
 
 impl Page<'_> {
-    fn b(&self) -> &dyn PdfiumLibraryBindings {
+    pub(crate) fn b(&self) -> &dyn PdfiumLibraryBindings {
         self.doc.bindings
     }
 
@@ -269,7 +396,7 @@ impl Page<'_> {
     }
 
     /// `reload`: closes the page view and the page, and loads the page again.
-    fn reload(&mut self) -> Result<(), String> {
+    pub(crate) fn reload(&mut self) -> Result<(), String> {
         // SAFETY: a loaded page; `close_page_view` calls `FORM_OnBeforeClosePage` even
         // when the view was never loaded, as Rails does.
         unsafe {
@@ -282,12 +409,12 @@ impl Page<'_> {
         self.load()
     }
 
-    fn width(&self) -> f64 {
+    pub(crate) fn width(&self) -> f64 {
         // SAFETY: a loaded page.
         f64::from(unsafe { self.b().FPDF_GetPageWidthF(self.ptr) })
     }
 
-    fn height(&self) -> f64 {
+    pub(crate) fn height(&self) -> f64 {
         // SAFETY: a loaded page.
         f64::from(unsafe { self.b().FPDF_GetPageHeightF(self.ptr) })
     }
@@ -362,7 +489,7 @@ impl Page<'_> {
 
     /// `flatten`: loads the page view, sets missing media and crop boxes, flattens the
     /// annotations, and reloads the page when anything was flattened.
-    fn flatten(&mut self) -> Result<(), String> {
+    pub(crate) fn flatten(&mut self) -> Result<(), String> {
         if !self.view_loaded && !self.doc.form.is_null() {
             // SAFETY: a loaded page and the document's form handle.
             unsafe { self.b().FORM_OnAfterLoadPage(self.ptr, self.doc.form) };
@@ -399,7 +526,7 @@ impl Page<'_> {
         Ok(())
     }
 
-    fn objects(&self) -> Vec<FPDF_PAGEOBJECT> {
+    pub(crate) fn objects(&self) -> Vec<FPDF_PAGEOBJECT> {
         // SAFETY: a loaded page.
         unsafe {
             let count = self.b().FPDFPage_CountObjects(self.ptr);
@@ -410,7 +537,7 @@ impl Page<'_> {
         }
     }
 
-    fn object_type(&self, object: FPDF_PAGEOBJECT) -> i32 {
+    pub(crate) fn object_type(&self, object: FPDF_PAGEOBJECT) -> i32 {
         // SAFETY: an object of the loaded page.
         unsafe { self.b().FPDFPageObj_GetType(object) }
     }
@@ -418,12 +545,20 @@ impl Page<'_> {
     /// `unwrap_form_objects`: moves the objects of each form `XObject` onto the page, with
     /// the form's matrix applied, until none are left.
     fn unwrap_form_objects(&mut self) -> Result<(), String> {
+        self.unwrap_form_objects_in(None)
+    }
+
+    /// `unwrap_form_objects(rect_bounds)`: only the forms whose bounds intersect one of
+    /// the `[left, bottom, right, top]` rects, when given.
+    pub(crate) fn unwrap_form_objects_in(
+        &mut self,
+        rects: Option<&[[f64; 4]]>,
+    ) -> Result<(), String> {
         let mut unwrapped = false;
-        while let Some(form) = self
-            .objects()
-            .into_iter()
-            .find(|&o| self.object_type(o) == FPDF_PAGEOBJ_FORM)
-        {
+        while let Some(form) = self.objects().into_iter().find(|&o| {
+            self.object_type(o) == FPDF_PAGEOBJ_FORM
+                && rects.is_none_or(|rects| self.intersects(o, rects))
+        }) {
             unwrapped = true;
             let mut matrix = FS_MATRIX {
                 a: 1.0,
@@ -482,8 +617,40 @@ impl Page<'_> {
         Ok(())
     }
 
+    /// `FPDFPageObj_GetBounds`, as `[left, bottom, right, top]`.
+    pub(crate) fn bounds(&self, object: FPDF_PAGEOBJECT) -> Option<[f64; 4]> {
+        let (mut l, mut b, mut r, mut t) = (0f32, 0f32, 0f32, 0f32);
+        // SAFETY: an object of the loaded page and floats to fill.
+        let ok = unsafe {
+            self.b()
+                .FPDFPageObj_GetBounds(object, &raw mut l, &raw mut b, &raw mut r, &raw mut t)
+        };
+        (ok != 0).then(|| [l, b, r, t].map(f64::from))
+    }
+
+    fn intersects(&self, object: FPDF_PAGEOBJECT, rects: &[[f64; 4]]) -> bool {
+        self.bounds(object)
+            .is_some_and(|[left, bottom, right, top]| {
+                rects
+                    .iter()
+                    .any(|&[rl, rb, rr, rt]| left < rr && right > rl && bottom < rt && top > rb)
+            })
+    }
+
+    /// `rotation`: `FPDFPage_GetRotation`.
+    pub(crate) fn rotation(&self) -> i32 {
+        // SAFETY: a loaded page.
+        unsafe { self.b().FPDFPage_GetRotation(self.ptr) }
+    }
+
+    /// `rotation=`.
+    pub(crate) fn set_rotation(&mut self, value: i32) {
+        // SAFETY: a loaded page.
+        unsafe { self.b().FPDFPage_SetRotation(self.ptr, value) };
+    }
+
     /// `rotate`: bakes the page rotation into the content, boxes and annotations.
-    fn rotate(&mut self) {
+    pub(crate) fn rotate(&mut self) {
         // SAFETY: a loaded page; every pointer passed is to a local.
         unsafe {
             let rotation = self.b().FPDFPage_GetRotation(self.ptr);

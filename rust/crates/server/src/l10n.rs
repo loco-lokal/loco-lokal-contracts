@@ -15,6 +15,22 @@ pub fn timezone_abbr(timezone: &str, utc: NaiveDateTime) -> String {
         .to_owned()
 }
 
+/// `TimeUtils::US_TIMEZONES`.
+const US_TIMEZONES: &[&str] = &[
+    "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT", "HST", "HDT", "AKST", "AKDT",
+];
+
+/// Whether `TimeUtils.timezone_abbr(timezone, Time.current.beginning_of_year)` is a US
+/// zone: the accounts whose default paper is US Letter.
+#[must_use]
+pub fn uses_us_letter(timezone: &str) -> bool {
+    use chrono::Datelike as _;
+    let start = chrono::NaiveDate::from_ymd_opt(chrono::Utc::now().year(), 1, 1)
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .unwrap_or_default();
+    US_TIMEZONES.contains(&timezone_abbr(timezone, start).as_str())
+}
+
 /// `I18n.l(utc.in_time_zone(timezone), format:, locale:)`.
 #[must_use]
 pub fn time(

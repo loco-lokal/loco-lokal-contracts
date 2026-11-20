@@ -455,7 +455,7 @@ fn replace_union(text: &str, keys: &[String], map: &HashMap<String, String>) -> 
     out
 }
 
-fn renew_uuids(
+pub(crate) fn renew_uuids(
     submitters: &mut Value,
     fields: &mut Value,
     schema: &mut Value,

@@ -35,7 +35,7 @@ use crate::{
 const SIGNED_KEY_HOURS: i64 = 6;
 
 /// `params[:files].presence || params[:file]`.
-fn uploaded_files(form: &FormParams) -> Vec<&UploadedFile> {
+pub(super) fn uploaded_files(form: &FormParams) -> Vec<&UploadedFile> {
     let files: Vec<&UploadedFile> = form
         .files
         .iter()
@@ -185,7 +185,7 @@ pub async fn new_from_url(RequireAuth(_auth): RequireAuth) -> Response {
 }
 
 /// `turbo_stream.append(params[:form_id], html: tag.prompt_password)`.
-fn prompt_password(form_id: &str) -> Response {
+pub(super) fn prompt_password(form_id: &str) -> Response {
     let body = format!(
         "<turbo-stream action=\"append\" target=\"{}\"><template><prompt-password></prompt-password></template></turbo-stream>",
         loco_views::assets::escape_attr(form_id)
@@ -198,6 +198,39 @@ fn prompt_password(form_id: &str) -> Response {
     response
 }
 
+/// `load_and_authorize_resource :template`: the template (404 when missing) if the user
+/// may read it and every action in `actions`, else the access-denied redirect.
+pub(super) async fn authorized_template(
+    state: &AppState,
+    auth: &crate::auth::Auth,
+    session: &Session,
+    headers: &HeaderMap,
+    id: &str,
+    actions: &[Action],
+) -> Result<Result<templates::Template, Response>, AppError> {
+    let Some(template) = templates::find(&state.db, api::params::to_i(id)).await? else {
+        return Err(AppError::Status(StatusCode::NOT_FOUND));
+    };
+    for action in std::iter::once(&Action::Read).chain(actions) {
+        if !api::templates::can(state, auth, &template, *action).await? {
+            session.flash_alert("You are not authorized to access this page.");
+            return Ok(Err(redirect_to(state, headers, "/")));
+        }
+    }
+    Ok(Ok(template))
+}
+
+/// [`authorized_template`] with `authorize!(:update, @template)`.
+pub(super) async fn editable_template(
+    state: &AppState,
+    auth: &crate::auth::Auth,
+    session: &Session,
+    headers: &HeaderMap,
+    id: &str,
+) -> Result<Result<templates::Template, Response>, AppError> {
+    authorized_template(state, auth, session, headers, id, &[Action::Update]).await
+}
+
 /// `POST /templates/:template_id/documents`: documents added in the template builder.
 pub async fn create_documents(
     State(state): State<AppState>,
@@ -207,20 +240,10 @@ pub async fn create_documents(
     Path(template_id): Path<String>,
     form: FormParams,
 ) -> Result<Response, AppError> {
-    let template = match template_id.parse::<i64>() {
-        Ok(id) => templates::find(&state.db, id).await?,
-        Err(_) => None,
+    let template = match editable_template(&state, &auth, &session, &headers, &template_id).await? {
+        Ok(template) => template,
+        Err(response) => return Ok(response),
     };
-    let Some(template) = template else {
-        return Err(AppError::Status(StatusCode::NOT_FOUND));
-    };
-    // `load_and_authorize_resource :template` (`:show`) and `authorize!(:update, …)`.
-    if !api::templates::can(&state, &auth, &template, Action::Read).await?
-        || !api::templates::can(&state, &auth, &template, Action::Update).await?
-    {
-        session.flash_alert("You are not authorized to access this page.");
-        return Ok(redirect_to(&state, &headers, "/"));
-    }
 
     let locale = locale::app_locale(&state, Some(&auth), None);
     let attachments = uploaded_files(&form);
@@ -291,7 +314,7 @@ fn attachment_attributes(attachment: &loco_storage::Attachment) -> serde_json::M
 
 /// `documents.as_json(methods: %i[metadata signed_key], include: { preview_images:
 /// { methods: %i[url metadata filename] } })`.
-fn document_json(state: &AppState, origin: &str, document: &Document) -> Value {
+pub(super) fn document_json(state: &AppState, origin: &str, document: &Document) -> Value {
     let mut json = attachment_attributes(&document.attachment);
     json.insert("metadata".into(), document.metadata.clone());
     json.insert(

@@ -1,6 +1,8 @@
 //! `loco_pdf::upload` on PDFs from `scripts/parity/uploads_seed.rb` (HexaPDF): the fields
-//! and links Rails extracts from them (checked against Rails by `uploads.py`).
+//! and links Rails extracts from them (checked against Rails by `uploads.py`, and against
+//! Rails' output in `upload-golden.json`).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use loco_pdf::upload::{OpenError, process};
@@ -89,4 +91,53 @@ fn needs_the_password_and_decrypts_with_it() {
     assert_ne!(with.data, bytes);
     assert!(!String::from_utf8_lossy(&with.data).contains("/Encrypt"));
     assert_eq!(with.fields.unwrap(), Vec::<Value>::new());
+}
+
+/// Replaces uuids with their order of first appearance, so that areas' `option_uuid`s are
+/// compared with the options they point to.
+fn number_uuids(value: &Value, numbers: &mut HashMap<String, usize>) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), number_uuids(v, numbers)))
+                .collect(),
+        ),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|v| number_uuids(v, numbers)).collect())
+        }
+        Value::String(s) if uuid::Uuid::try_parse(s).is_ok() => {
+            let next = numbers.len();
+            Value::String(format!("uuid {}", numbers.entry(s.clone()).or_insert(next)))
+        }
+        other => other.clone(),
+    }
+}
+
+/// The JSON as Rails stores it (`to_json`), key order and float digits included.
+fn stored(value: &Value) -> String {
+    loco_rails_compat::json::generate(&number_uuids(value, &mut HashMap::new()))
+}
+
+/// `upload-golden.json` holds what Rails' `Templates::FindPdfiumAcroFields` and
+/// `Templates::BuildPdfiumAnnotations` return for the fixtures, as stored JSON with
+/// numbered uuids (`scripts/generate-golden.sh`).
+#[test]
+fn extracts_the_fields_and_links_rails_does() {
+    let golden: serde_json::Map<String, Value> =
+        serde_json::from_slice(&fixture("upload-golden.json")).unwrap();
+    assert_eq!(golden.len(), 5);
+    for (name, expected) in &golden {
+        let bytes = fixture(name);
+        let processed = loco_pdf::with_shared(|pdfium| process(pdfium, &bytes, None, "doc", true))
+            .expect("run rust/scripts/fetch-pdfium.sh")
+            .unwrap();
+        let fields = Value::Array(processed.fields.unwrap());
+        assert_eq!(stored(&fields), expected["fields"], "{name}: fields");
+        let annotations = Value::Array(processed.annotations);
+        assert_eq!(
+            stored(&annotations),
+            expected["annotations"],
+            "{name}: annotations"
+        );
+    }
 }

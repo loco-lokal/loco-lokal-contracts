@@ -105,7 +105,20 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/templates/{template_id}/documents",
-            post(crate::templates::uploads::create_documents),
+            get(crate::templates::documents::index)
+                .post(crate::templates::uploads::create_documents),
+        )
+        .route(
+            "/templates/{template_id}/documents_modify",
+            post(crate::templates::modify::create),
+        )
+        .route(
+            "/templates/{template_id}/documents_crop",
+            get(crate::templates::documents::crop_corners).post(crate::templates::documents::crop),
+        )
+        .route(
+            "/templates/{template_id}/clone_and_replace",
+            post(crate::templates::clone_replace::create),
         )
         .route(
             "/templates/{template_id}/detect_fields",
