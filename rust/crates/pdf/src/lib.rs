@@ -1,10 +1,12 @@
 //! PDF rendering, modification, and signing. Replaces `lib/pdfium.rb`, `lib/pdf_utils.rb`,
 //! and the `HexaPDF` usage in `lib/submissions/`.
 
+pub mod acroform;
 pub mod cms;
 pub mod edit;
 pub mod image_page;
 pub mod jpeg;
+pub mod modify;
 pub mod pages;
 pub mod signatures;
 pub mod text;
@@ -13,7 +15,8 @@ pub mod upload;
 
 use std::path::{Path, PathBuf};
 
-use pdfium_render::prelude::{Pdfium, PdfiumError};
+pub use pdfium_render::prelude::Pdfium;
+use pdfium_render::prelude::PdfiumError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PdfError {
