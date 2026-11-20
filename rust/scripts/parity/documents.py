@@ -105,6 +105,9 @@ def new_template(sessions, users, label, files, extra=()):
         if extra:
             status, body, _, _ = sessions[name].post_files(f"/templates/{ids[name]}/documents", [], list(extra),
                                                            json_response=True)
+            if status != 200:
+                report(False, f"{label}: {name} added documents", f"  {status} {body[:300]}")
+                return None
             # The builder saves the new schema items with the template.
             template, _ = stored(ids[name])
             schema = template["schema"] + json.loads(body)["schema"]
