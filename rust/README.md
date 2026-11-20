@@ -126,7 +126,10 @@ cd rust/scripts/parity
 ./email_2fa.py "$PARITY_TOKEN" "$PARITY_TEMPLATE_ID"  # email one-time codes on /s/:slug and /d/:slug: pages, redirects, emails, otp_challenges and events
 ./uploads.py "$PARITY_TOKEN"                         # template uploads and added documents: responses, stored rows, preview PNGs
 ./previews.py                                        # /preview/:signed_key/:page, /templates/:id/preview, documents_page_objects (seeds its own template)
+./documents.py "$PARITY_TOKEN"                       # documents_modify, GET documents, clone_and_replace: responses, stored rows, rendered PDFs, previews
 ```
+
+`documents.py` uses the user and the PDFs of `uploads.py` (with `documents_seed.rb`'s files) and needs Pillow and poppler (`pdftoppm`, `pdftotext`). `DOCUMENTS_KEEP=1` keeps the templates it creates.
 
 `uploads.py` signs in on both servers as a user that `uploads_seed.rb` creates with a known password, and uploads PDFs (form fields, links, 18 pages, a password) and images that the seed builds with HexaPDF and libvips. It needs Pillow, and reads the stored previews through the `rails` service. `UPLOADS_EXTRA_PDFS` (paths separated by `:`) adds uploads of more PDFs, such as forms found in the wild.
 
@@ -240,7 +243,7 @@ AcroForm field detection (issue #10, `loco_pdf::upload`) gives the same fields a
 - Links: `http(s)` URIs only, with the 250-link limit checked before each page, as in Rails (so a page can take the count past 250).
 - Rails' `PDFium` build reads checkbox and radio states and export values through its own "raw" functions; the Rust server loads the page's form view so that the standard functions return the same values.
 
-`uploads.py` compares these through uploads and added documents, including the HexaPDF fixtures for each branch and, with `UPLOADS_EXTRA_PDFS`, real forms (IRS W-9, W-4, W-8BEN, 1040, 4506-T, SS-4, 8822, GSA SF1449, OPM SF2809 matched). `crates/pdf/tests/upload.rs` checks the fixtures against Rails' stored JSON, float digits included. The other callers of the detection (replacing documents with `clone_and_replace`, MCP's `create_template` and the template builder's document edits) are ported with their endpoints (#12, #21).
+`uploads.py` compares these through uploads and added documents, including the HexaPDF fixtures for each branch and, with `UPLOADS_EXTRA_PDFS`, real forms (IRS W-9, W-4, W-8BEN, 1040, 4506-T, SS-4, 8822, GSA SF1449, OPM SF2809 matched). `crates/pdf/tests/upload.rs` checks the fixtures against Rails' stored JSON, float digits included. Replacing documents with `clone_and_replace` uses it too (see below); MCP's `create_template` is ported with its endpoint (#21).
 
 Preview pages of PDFs come out pixel for pixel as in Rails, although the two `PDFium` builds differ. Rails' build reads checkbox and radio states through its own "raw" functions; the Rust server loads the page's form view instead, so the standard functions see them too. Previews of uploaded images differ slightly (mean difference below 0.3 of 255), because `image`'s filters replace libvips' resize, so their palettes can have a few more or fewer colors. The PNG compression differs as well, so preview byte sizes and checksums are not the same as Rails'.
 
@@ -253,6 +256,17 @@ The document page endpoints around the template builder:
 - `loco_rails_compat::json` writes floats as the `json` gem (2.21, `fpconv`) does, so `render json:` bodies match Rails' digits. `api::rails_json` uses it for every response.
 
 `previews.py` covers these. `/templates/:id/preview` in the Hotwire Native apps answers 422.
+
+The template builder's document edits (issue #12):
+
+- `templates/modify.rs` ports `TemplateDocumentsModifyController` and `Templates::ModifyDocuments`. The layout is validated as Rails validates it (422 `unable_to_save`; 400 without `documents`). Unchanged documents are kept, and changed ones are built again. Pages are reordered, moved between documents (`replaced_page`), turned and redacted. Field areas follow their pages (turned with them), fields left without areas are removed, and so are the conditions on them.
+- `loco_pdf::modify` builds the PDFs with `PDFium` as `lib/pdfium.rb` does: `FPDF_ImportPages` per run of pages, then `Pdfium::Page#redact` (flatten, unwrap the form XObjects under a box, remove the covered characters and rewrite the rest of their text objects in Helvetica, redact image objects, draw the black boxes, drop blank text), then the turns.
+- Rails' `PDFium` build adds `FPDF_ImportAcroForm` and `FPDF_RemoveOrphanObjects`, which the public builds lack. `loco_pdf::acroform` does their work on the saved file with lopdf. It copies the field trees whose `/Parent` the public `FPDF_ImportPages` leaves pointing into the source. It registers the root fields in page order (`name_1` for a taken name) with `/DA`, `/DR`, `/Q` and `/NeedAppearances` from the sources. Flattened fields leave `/Fields`, and after a redaction unreferenced objects (the redacted text's fonts) are removed. Without widgets there is no `/AcroForm`, as in Rails.
+- Images follow `ModifyDocuments` and libvips (`templates/images.rs`). An image page in a PDF entry is its first preview, flattened, redacted and turned, as a palette PNG in a page (`BuildImagePagePdf`). The page takes the entry's PDF paper size, the image's own shape, or the account's paper for scans. An image alone is turned or redacted and written again as JPEG (Q 90) or PNG. Redacted image objects in PDFs become JPEGs (Q 50). `loco_pdf::jpeg::encode_baseline` writes these JPEGs byte for byte as libvips does with `strip: true`: baseline, standard Huffman tables, 4:2:0 below Q 90.
+- `GET /templates/:id/documents` (`TemplateDocumentsController#index`): the schema documents' signed proxy paths, valid for five minutes.
+- `templates/clone_replace.rs` ports `TemplatesCloneAndReplaceController`, `Templates::Clone`, `Templates::ReplaceAttachments` and `Templates::CloneAttachments`. The new template is named after the first file. The uploads replace the first documents and take over their areas, and an upload whose pages no field uses brings its form fields (inserted at Rails' index, `pending_fields` for the first). The other documents are copied. It answers HTML (redirect to the builder, or the password prompt) or JSON.
+
+`documents.py` covers these. The PDFs differ from Rails' in their bytes (another `PDFium` build, and lopdf's rewrite), so it compares their rendered pages, text, field names, and the objects that still hold redacted text. After a redaction, Rails' `FPDF_RemoveOrphanObjects` can leave a cross-reference entry without its object; readers rebuild the table, and the Rust files don't have this. Previews of image documents are resized by `image` instead of libvips (as for uploads), so a 2-bit (four color) preview can get another palette from the same image. The script reports that as known.
 
 These parts return 422 ("not supported yet") or are still missing:
 
@@ -274,6 +288,8 @@ These parts return 422 ("not supported yet") or are still missing:
 - Extracting email assets from message bodies of 2 KB or more.
 - Uploading Word documents (Rails converts them with the closed-source `WordCraft` gem), ZIP archives, and documents from a URL (`/templates_upload/new`, `params[:url]`) answer 422.
 - The template builder itself (`/templates/:id/edit`, where uploads redirect) and MCP's `create_template`.
+- Cropping photographed pages (`GET` and `POST /templates/:id/documents_crop`, `Templates::CreateDocumentCrop`): Rails finds the corners, warps, turns and dewarps with Leptonica, and resizes and decodes with libvips. Both answer 422 once the template and the document are found.
+- `GET /templates/:id/documents` with dynamic documents, and `clone_and_replace` of templates with dynamic documents, answer 422.
 
 ## Layout
 

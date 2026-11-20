@@ -5,6 +5,10 @@
 //! Not supported yet (422 before anything is stored): ZIP archives, Word documents (Rails
 //! converts them with the closed-source `WordCraft` gem) and uploads from a URL.
 
+pub mod clone_replace;
+pub mod documents;
+mod images;
+pub mod modify;
 pub mod previews;
 pub mod uploads;
 
@@ -16,13 +20,13 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{api::params::UploadedFile, state::AppState};
 
-const PDF_CONTENT_TYPE: &str = "application/pdf";
+pub(crate) const PDF_CONTENT_TYPE: &str = "application/pdf";
 const ZIP_CONTENT_TYPES: &[&str] = &["application/zip", "application/x-zip-compressed"];
 /// `Templates::CreateAttachments::WORD_EXTENSIONS`.
 const WORD_EXTENSIONS: &[&str] = &[".docx", ".doc", ".odt", ".rtf"];
 /// `ActiveStorage::Attachment` names.
-const DOCUMENTS: &str = "documents";
-const PREVIEW_IMAGES: &str = "preview_images";
+pub(crate) const DOCUMENTS: &str = "documents";
+pub(crate) const PREVIEW_IMAGES: &str = "preview_images";
 
 /// A created template document, with the metadata Rails holds in memory afterwards (it
 /// includes `pdf.fields`, which is not stored).
@@ -296,8 +300,96 @@ async fn handle_pdf_or_image(
     Ok(document)
 }
 
+/// `save_document` of `Templates::ModifyDocuments` with `ProcessDocument.call(document,
+/// data, doc:)`: a PDF this server built, with its links, page count and previews.
+pub(crate) async fn create_pdf_document(
+    state: &AppState,
+    template_id: i64,
+    data: Vec<u8>,
+    filename: &str,
+) -> anyhow::Result<Document> {
+    let attachment_uuid = uuid::Uuid::new_v4().to_string();
+    let uuid = attachment_uuid.clone();
+    let processed = tokio::task::spawn_blocking(move || {
+        loco_pdf::with_shared(|pdfium| loco_pdf::upload::process(pdfium, &data, None, &uuid, false))
+    })
+    .await???;
+
+    let data = Bytes::from(processed.data);
+    let mut metadata = Map::new();
+    metadata.insert("identified".into(), true.into());
+    metadata.insert("analyzed".into(), true.into());
+    if !processed.annotations.is_empty() {
+        metadata.insert(
+            "pdf".into(),
+            json!({ "annotations": processed.annotations }),
+        );
+    }
+    metadata.insert("sha256".into(), sha256(&data).into());
+    let pdf = metadata.entry("pdf").or_insert_with(|| json!({}));
+    pdf["number_of_pages"] = processed.number_of_pages.into();
+    let stored = Value::Object(metadata);
+    let (attachment, blob) = create_document(
+        state,
+        template_id,
+        &attachment_uuid,
+        data,
+        filename,
+        PDF_CONTENT_TYPE,
+        &stored,
+    )
+    .await?;
+    let bitmaps = processed.previews.map_err(anyhow::Error::msg)?;
+    let pngs = tokio::task::spawn_blocking(move || {
+        bitmaps
+            .iter()
+            .map(previews::page_png)
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .await??;
+    let previews = upload_previews(state, attachment.id, pngs).await?;
+    Ok(Document {
+        attachment,
+        blob,
+        metadata: stored,
+        previews,
+    })
+}
+
+/// `build_image_document`'s blob (`metadata: { identified: true, analyzed: true }`) and
+/// document, with its preview (`ProcessDocument.generate_preview_image`).
+pub(crate) async fn create_image_document(
+    state: &AppState,
+    template_id: i64,
+    data: Bytes,
+    filename: &str,
+    content_type: &str,
+) -> anyhow::Result<Document> {
+    let metadata = json!({ "identified": true, "analyzed": true });
+    let (attachment, blob) = create_document(
+        state,
+        template_id,
+        &uuid::Uuid::new_v4().to_string(),
+        data.clone(),
+        filename,
+        content_type,
+        &metadata,
+    )
+    .await?;
+    let content_type = content_type.to_owned();
+    let preview =
+        tokio::task::spawn_blocking(move || previews::image_png(&data, &content_type)).await??;
+    let previews = upload_previews(state, attachment.id, vec![preview]).await?;
+    Ok(Document {
+        attachment,
+        blob,
+        metadata,
+        previews,
+    })
+}
+
 /// `create_document`: the blob and the template's `documents` attachment.
-async fn create_document(
+pub(crate) async fn create_document(
     state: &AppState,
     template_id: i64,
     attachment_uuid: &str,

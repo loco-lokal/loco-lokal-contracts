@@ -132,7 +132,7 @@ struct Component {
 /// `jpegsave` with `interlace: true` and `Q: quality` (below 90, so 4:2:0).
 #[must_use]
 pub fn encode_rgba(rgba: &[u8], width: usize, height: usize, quality: u32) -> Vec<u8> {
-    let (y, cb, cr) = rgb_to_ycc(rgba, width, height);
+    let (y, cb, cr) = rgb_to_ycc(rgba, 4, width, height);
     let luma_q = quant_table(&LUMA_QUANT, quality);
     let chroma_q = quant_table(&CHROMA_QUANT, quality);
 
@@ -192,6 +192,247 @@ pub fn encode_rgba(rgba: &[u8], width: usize, height: usize, quality: u32) -> Ve
     }
     out.extend_from_slice(&[0xFF, 0xD9]);
     out
+}
+
+/// `std_huff_tables` (`jcparam.c`): code counts per length (1 to 16) and values of the
+/// DC and AC tables, luma then chroma.
+const STD_DC_BITS: [[u8; 16]; 2] = [
+    [0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+    [0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+];
+const STD_DC_VALUES: [u8; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const STD_AC_BITS: [[u8; 16]; 2] = [
+    [0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125],
+    [0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119],
+];
+const STD_AC_VALUES: [[u8; 162]; 2] = [
+    [
+        0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61,
+        0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08, 0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52,
+        0xd1, 0xf0, 0x24, 0x33, 0x62, 0x72, 0x82, 0x09, 0x0a, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x25,
+        0x26, 0x27, 0x28, 0x29, 0x2a, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x43, 0x44, 0x45,
+        0x46, 0x47, 0x48, 0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63, 0x64,
+        0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x83,
+        0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99,
+        0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6,
+        0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3,
+        0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8,
+        0xe9, 0xea, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa,
+    ],
+    [
+        0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21, 0x31, 0x06, 0x12, 0x41, 0x51, 0x07, 0x61,
+        0x71, 0x13, 0x22, 0x32, 0x81, 0x08, 0x14, 0x42, 0x91, 0xa1, 0xb1, 0xc1, 0x09, 0x23, 0x33,
+        0x52, 0xf0, 0x15, 0x62, 0x72, 0xd1, 0x0a, 0x16, 0x24, 0x34, 0xe1, 0x25, 0xf1, 0x17, 0x18,
+        0x19, 0x1a, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x43, 0x44,
+        0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63,
+        0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a,
+        0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
+        0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4,
+        0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca,
+        0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
+        0xe8, 0xe9, 0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa,
+    ],
+];
+
+fn std_table(bits: &[u8; 16], values: &[u8]) -> HuffTable {
+    let mut table_bits = [0u8; 17];
+    table_bits[1..].copy_from_slice(bits);
+    HuffTable {
+        bits: table_bits,
+        values: values.to_vec(),
+    }
+}
+
+/// Encodes gray (`bands` 1) or RGB (`bands` 3) samples like libvips' `jpegsave` with
+/// `Q: quality, strip: true`: a baseline JPEG with the standard Huffman tables and no
+/// APP segments, chroma subsampled 4:2:0 below `Q` 90 and not at all from 90 on.
+#[must_use]
+pub fn encode_baseline(
+    samples: &[u8],
+    width: usize,
+    height: usize,
+    bands: usize,
+    quality: u32,
+) -> Vec<u8> {
+    let luma_q = quant_table(&LUMA_QUANT, quality);
+    let chroma_q = quant_table(&CHROMA_QUANT, quality);
+    let full = |id: u8, plane: &[u8], qtable: &[u32; 64], table: usize| {
+        let (cols, rows) = (width.div_ceil(8), height.div_ceil(8));
+        let sample = |x: usize, y: usize| plane[y.min(height - 1) * width + x.min(width - 1)];
+        blocks_of(id, 1, qtable, table, (cols, rows), (cols, rows), sample)
+    };
+    let (components, mcus) = if bands == 1 {
+        let plane: Vec<u8> = samples.iter().take(width * height).copied().collect();
+        (
+            vec![full(1, &plane, &luma_q, 0)],
+            (width.div_ceil(8), height.div_ceil(8)),
+        )
+    } else {
+        let (y, cb, cr) = rgb_to_ycc(samples, bands, width, height);
+        if quality < 90 {
+            let mcus = (width.div_ceil(16), height.div_ceil(16));
+            (
+                vec![
+                    luma_component(&y, width, height, &luma_q, mcus.0, mcus.1),
+                    chroma_component(2, &cb, width, height, &chroma_q),
+                    chroma_component(3, &cr, width, height, &chroma_q),
+                ],
+                mcus,
+            )
+        } else {
+            (
+                vec![
+                    full(1, &y, &luma_q, 0),
+                    full(2, &cb, &chroma_q, 1),
+                    full(3, &cr, &chroma_q, 1),
+                ],
+                (width.div_ceil(8), height.div_ceil(8)),
+            )
+        }
+    };
+
+    let mut out = vec![0xFF, 0xD8];
+    let tables: &[&[u32; 64]] = if bands == 1 {
+        &[&luma_q]
+    } else {
+        &[&luma_q, &chroma_q]
+    };
+    for (index, table) in tables.iter().enumerate() {
+        out.extend_from_slice(&[0xFF, 0xDB, 0x00, 0x43]);
+        out.push(u8::try_from(index).unwrap_or_default());
+        out.extend(
+            NATURAL_ORDER
+                .iter()
+                .map(|&i| u8::try_from(table[i]).unwrap_or(255)),
+        );
+    }
+    out.extend_from_slice(&[0xFF, 0xC0]);
+    out.extend_from_slice(
+        &u16::try_from(8 + 3 * components.len())
+            .unwrap_or_default()
+            .to_be_bytes(),
+    );
+    out.push(8);
+    out.extend_from_slice(&u16::try_from(height).unwrap_or(u16::MAX).to_be_bytes());
+    out.extend_from_slice(&u16::try_from(width).unwrap_or(u16::MAX).to_be_bytes());
+    out.push(u8::try_from(components.len()).unwrap_or_default());
+    for c in &components {
+        out.extend_from_slice(&[
+            c.id,
+            u8::try_from((c.h << 4) | c.v).unwrap_or_default(),
+            u8::try_from(c.table).unwrap_or_default(),
+        ]);
+    }
+    let table_count = tables.len();
+    let mut derived = Vec::new();
+    for table in 0..table_count {
+        let dc = std_table(&STD_DC_BITS[table], &STD_DC_VALUES);
+        let ac = std_table(&STD_AC_BITS[table], &STD_AC_VALUES[table]);
+        let index = u8::try_from(table).unwrap_or_default();
+        dc.write_dht(&mut out, index);
+        ac.write_dht(&mut out, 0x10 | index);
+        derived.push((dc.derive(), ac.derive()));
+    }
+    out.extend_from_slice(&[0xFF, 0xDA]);
+    out.extend_from_slice(
+        &u16::try_from(6 + 2 * components.len())
+            .unwrap_or_default()
+            .to_be_bytes(),
+    );
+    out.push(u8::try_from(components.len()).unwrap_or_default());
+    for c in &components {
+        let table = u8::try_from(c.table).unwrap_or_default();
+        out.extend_from_slice(&[c.id, (table << 4) | table]);
+    }
+    out.extend_from_slice(&[0, 63, 0]);
+
+    let mut writer = BitWriter::default();
+    let mut last_dc = vec![0i32; components.len()];
+    for my in 0..mcus.1 {
+        for mx in 0..mcus.0 {
+            for (ci, c) in components.iter().enumerate() {
+                let (dc, ac) = &derived[c.table];
+                for y in 0..c.v {
+                    for x in 0..c.h {
+                        let block = &c.blocks[(my * c.v + y) * c.stride + mx * c.h + x];
+                        writer.encode_block(block, &mut last_dc[ci], dc, ac);
+                    }
+                }
+            }
+        }
+    }
+    writer.emit_bits(0x7F, 7);
+    out.extend_from_slice(&writer.bytes);
+    out.extend_from_slice(&[0xFF, 0xD9]);
+    out
+}
+
+/// `jchuff.c`'s bit buffer and `encode_one_block`.
+#[derive(Default)]
+struct BitWriter {
+    bytes: Vec<u8>,
+    put_buffer: u32,
+    put_bits: u32,
+}
+
+impl BitWriter {
+    fn emit_bits(&mut self, code: u32, size: u32) {
+        if size == 0 {
+            return;
+        }
+        let mut buffer = code & ((1 << size) - 1);
+        self.put_bits += size;
+        buffer <<= 24 - self.put_bits;
+        buffer |= self.put_buffer;
+        while self.put_bits >= 8 {
+            let c = u8::try_from((buffer >> 16) & 0xFF).unwrap_or_default();
+            self.bytes.push(c);
+            if c == 0xFF {
+                self.bytes.push(0);
+            }
+            buffer <<= 8;
+            self.put_bits -= 8;
+        }
+        self.put_buffer = buffer & 0x00FF_FFFF;
+    }
+
+    fn emit_symbol(&mut self, table: &Derived, symbol: usize) {
+        self.emit_bits(table.code[symbol], u32::from(table.size[symbol]));
+    }
+
+    /// The low `nbits` of a coefficient, one less when it is negative.
+    #[allow(clippy::cast_sign_loss, reason = "libjpeg emits the low bits of temp2")]
+    fn emit_value(&mut self, value: i32, nbits: u32) {
+        let bits = if value < 0 { value - 1 } else { value };
+        self.emit_bits(bits as u32, nbits);
+    }
+
+    fn encode_block(&mut self, block: &[i32; 64], last_dc: &mut i32, dc: &Derived, ac: &Derived) {
+        let diff = block[0] - *last_dc;
+        *last_dc = block[0];
+        let nbits = diff.unsigned_abs().bit_width();
+        self.emit_symbol(dc, usize::try_from(nbits).unwrap_or_default());
+        self.emit_value(diff, nbits);
+        let mut r = 0;
+        for &index in &NATURAL_ORDER[1..] {
+            let coef = block[index];
+            if coef == 0 {
+                r += 1;
+                continue;
+            }
+            while r > 15 {
+                self.emit_symbol(ac, 0xF0);
+                r -= 16;
+            }
+            let nbits = coef.unsigned_abs().bit_width();
+            self.emit_symbol(ac, (r << 4) + usize::try_from(nbits).unwrap_or_default());
+            self.emit_value(coef, nbits);
+            r = 0;
+        }
+        if r > 0 {
+            self.emit_symbol(ac, 0);
+        }
+    }
 }
 
 /// The APP1 segment libvips writes from the image's default metadata: orientation 1,
@@ -258,8 +499,14 @@ fn quant_table(basic: &[u32; 64], quality: u32) -> [u32; 64] {
     basic.map(|v| ((v * scale + 50) / 100).clamp(1, 255))
 }
 
-/// `rgb_ycc_convert` (`jccolor.c`), with its fixed-point tables.
-fn rgb_to_ycc(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+/// `rgb_ycc_convert` (`jccolor.c`), with its fixed-point tables, of pixels `bands` bytes
+/// apart.
+fn rgb_to_ycc(
+    pixels: &[u8],
+    bands: usize,
+    width: usize,
+    height: usize,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     const SCALEBITS: i64 = 16;
     const ONE_HALF: i64 = 1 << (SCALEBITS - 1);
     const CBCR_OFFSET: i64 = 128 << SCALEBITS;
@@ -274,7 +521,7 @@ fn rgb_to_ycc(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, Vec<u8>, Ve
 
     let n = width * height;
     let (mut y, mut cb, mut cr) = (vec![0; n], vec![0; n], vec![0; n]);
-    for (i, px) in rgba.as_chunks::<4>().0.iter().take(n).enumerate() {
+    for (i, px) in pixels.chunks_exact(bands).take(n).enumerate() {
         let (r, g, b) = (i64::from(px[0]), i64::from(px[1]), i64::from(px[2]));
         let luma = fix(0.299) * r + fix(0.587) * g + fix(0.114) * b + ONE_HALF;
         let blue =

@@ -21,12 +21,48 @@ struct Png {
     idat: Vec<u8>,
 }
 
-/// `BuildImagePagePdf.call(png_data, page_width:, page_height:, image_box:)`. Sizes are
-/// Ruby Floats; `image_box` is `[x, y, width, height]` and defaults to the whole page.
+/// A Ruby number: `Integer#round(4)` stays an Integer, so it prints without a fraction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Number {
+    Int(i64),
+    Float(f64),
+}
+
+impl Number {
+    fn round4(self) -> Self {
+        match self {
+            Self::Int(_) => self,
+            Self::Float(value) => Self::Float(round4(value)),
+        }
+    }
+
+    fn to_ruby(self) -> String {
+        match self {
+            Self::Int(value) => value.to_string(),
+            Self::Float(value) => ruby_float(value),
+        }
+    }
+}
+
+/// `BuildImagePagePdf.call(png_data, page_width:, page_height:, image_box:)` with Float
+/// sizes; `image_box` is `[x, y, width, height]` and defaults to the whole page.
 pub fn build(
     png_data: &[u8],
     page_width: f64,
     page_height: f64,
+    image_box: Option<[f64; 4]>,
+) -> Result<Vec<u8>, InvalidPng> {
+    build_sized(
+        png_data,
+        [Number::Float(page_width), Number::Float(page_height)],
+        image_box,
+    )
+}
+
+/// [`build`] with page sizes that may be Integers.
+pub fn build_sized(
+    png_data: &[u8],
+    [page_width, page_height]: [Number; 2],
     image_box: Option<[f64; 4]>,
 ) -> Result<Vec<u8>, InvalidPng> {
     let png = parse_png(png_data)?;
@@ -58,15 +94,15 @@ pub fn build(
         None => [
             "0".to_owned(),
             "0".to_owned(),
-            ruby_float(round4(page_width)),
-            ruby_float(round4(page_height)),
+            page_width.round4().to_ruby(),
+            page_height.round4().to_ruby(),
         ],
     };
     Ok(build_pdf(
         &png,
         &color_space,
         colors,
-        [round4(page_width), round4(page_height)],
+        [page_width.round4(), page_height.round4()],
         &image_box,
     ))
 }
@@ -154,7 +190,7 @@ fn build_pdf(
     png: &Png,
     color_space: &str,
     colors: u8,
-    [page_width, page_height]: [f64; 2],
+    [page_width, page_height]: [Number; 2],
     [image_x, image_y, image_width, image_height]: &[String; 4],
 ) -> Vec<u8> {
     let contents =
@@ -181,8 +217,8 @@ fn build_pdf(
         format!(
             "<< /Type /Page /Parent 2 0 R /MediaBox [ 0 0 {} {} ] \
              /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>",
-            ruby_float(page_width),
-            ruby_float(page_height)
+            page_width.to_ruby(),
+            page_height.to_ruby()
         )
         .into_bytes(),
         stream(&image_dict, &png.idat),

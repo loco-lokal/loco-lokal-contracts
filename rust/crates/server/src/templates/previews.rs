@@ -58,23 +58,40 @@ pub fn page_png(bitmap: &Bitmap) -> Result<Preview, PreviewError> {
     })
 }
 
-/// `generate_preview_image`: the uploaded image, upright (`autorot`), scaled to
-/// `MAX_WIDTH` wide, without metadata (`strip: true`) but with the source resolution.
-pub fn image_png(data: &[u8], content_type: &str) -> Result<Preview, PreviewError> {
-    let format = match content_type {
-        "image/png" | "image/apng" | "image/vnd.mozilla.apng" => ImageFormat::Png,
-        "image/jpeg" | "image/jpg" | "image/pjpeg" => ImageFormat::Jpeg,
-        "image/x-icon" | "image/vnd.microsoft.icon" => ImageFormat::Ico,
-        "image/bmp" | "image/x-bmp" | "image/x-ms-bmp" => ImageFormat::Bmp,
-        other => return Err(PreviewError::UnsupportedFormat(other.to_owned())),
-    };
+/// `ImageUtils.load_vips(data, content_type:, autorot:)` with `image`'s decoders.
+pub fn decode(
+    data: &[u8],
+    content_type: &str,
+    autorot: bool,
+) -> Result<DynamicImage, PreviewError> {
+    let format = image_format(content_type)?;
     let image_error = |e: image::ImageError| PreviewError::Image(e.to_string());
     let mut decoder = ImageReader::with_format(Cursor::new(data), format)
         .into_decoder()
         .map_err(image_error)?;
     let orientation = decoder.orientation().map_err(image_error)?;
     let mut image = DynamicImage::from_decoder(decoder).map_err(image_error)?;
-    image.apply_orientation(orientation);
+    if autorot {
+        image.apply_orientation(orientation);
+    }
+    Ok(image)
+}
+
+fn image_format(content_type: &str) -> Result<ImageFormat, PreviewError> {
+    Ok(match content_type {
+        "image/png" | "image/apng" | "image/vnd.mozilla.apng" => ImageFormat::Png,
+        "image/jpeg" | "image/jpg" | "image/pjpeg" => ImageFormat::Jpeg,
+        "image/x-icon" | "image/vnd.microsoft.icon" => ImageFormat::Ico,
+        "image/bmp" | "image/x-bmp" | "image/x-ms-bmp" => ImageFormat::Bmp,
+        other => return Err(PreviewError::UnsupportedFormat(other.to_owned())),
+    })
+}
+
+/// `generate_preview_image`: the uploaded image, upright (`autorot`), scaled to
+/// `MAX_WIDTH` wide, without metadata (`strip: true`) but with the source resolution.
+pub fn image_png(data: &[u8], content_type: &str) -> Result<Preview, PreviewError> {
+    let format = image_format(content_type)?;
+    let mut image = decode(data, content_type, true)?;
 
     let (width, height) = (image.width(), image.height());
     if width == 0 || height == 0 {
@@ -122,7 +139,7 @@ pub fn image_png(data: &[u8], content_type: &str) -> Result<Preview, PreviewErro
 }
 
 /// The sum of each of the first `count` bands (`image.stats` column 2).
-fn band_sums(samples: &[u8], bands: usize, count: usize) -> Vec<u64> {
+pub(crate) fn band_sums(samples: &[u8], bands: usize, count: usize) -> Vec<u64> {
     let mut sums = vec![0_u64; count];
     for pixel in samples.chunks_exact(bands) {
         for (sum, &value) in sums.iter_mut().zip(pixel) {
@@ -144,7 +161,7 @@ fn band_sums_u16(samples: &[u16], bands: usize) -> Vec<u64> {
 
 /// `2**image.stats.to_a[1..3].pluck(2).uniq.size`: 2 bits for gray images, 8 for most
 /// colored ones.
-fn bitdepth(sums: &[u64]) -> u8 {
+pub(crate) fn bitdepth(sums: &[u64]) -> u8 {
     let mut unique = sums.to_vec();
     unique.sort_unstable();
     unique.dedup();
@@ -153,7 +170,7 @@ fn bitdepth(sums: &[u64]) -> u8 {
 
 /// The `pHYs` value libvips writes: the loader's resolution (pixels per mm) × 1000. An
 /// EXIF resolution overrides the file's own (`vips__exif_parse`).
-fn pixels_per_meter(data: &[u8], format: ImageFormat) -> u32 {
+pub(crate) fn pixels_per_meter(data: &[u8], format: ImageFormat) -> u32 {
     let exif = match format {
         ImageFormat::Png => png_chunk(data, *b"eXIf"),
         ImageFormat::Jpeg => jpeg_exif(data),
@@ -322,7 +339,7 @@ fn page_exif(width: u32, height: u32) -> Vec<u8> {
 }
 
 /// Quantizes RGBA pixels and writes the palette PNG.
-fn encode(
+pub(crate) fn encode(
     rgba: &[u8],
     width: u32,
     height: u32,
