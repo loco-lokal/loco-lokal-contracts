@@ -120,6 +120,10 @@ pub fn router() -> Router<AppState> {
             "/templates/{template_id}/clone_and_replace",
             post(crate::templates::clone_replace::create),
         )
+        .route(
+            "/templates/{template_id}/detect_fields",
+            post(crate::templates::detect_fields::create),
+        )
         .merge(enterprise_routes())
         .merge(crate::api::router())
         .route("/file/{signed_uuid}/{*filename}", get(crate::files::show))

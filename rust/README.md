@@ -16,9 +16,10 @@ export PATH="/opt/homebrew/opt/rustup/bin:$PATH"   # add to ~/.zshrc
 
 ```sh
 rust/scripts/fetch-pdfium.sh   # pinned, checksum-verified libpdfium -> rust/vendor/pdfium/lib
+rust/scripts/fetch-onnx.sh     # field detection model and ONNX Runtime 1.24.4 -> rust/vendor/onnx
 ```
 
-Set `PDFIUM_LIB_DIR` to use a libpdfium from somewhere else.
+Set `PDFIUM_LIB_DIR` to use a libpdfium from somewhere else. `ONNX_MODEL_PATH` and `ORT_DYLIB_PATH` override the model and the ONNX Runtime library. Without them, the server uses `$APP_ROOT/tmp/model.onnx` (where the Docker image puts the model), then `rust/vendor/onnx`, and the system's `libonnxruntime.so.1` (Alpine's `onnxruntime` package in the Docker image). ONNX Runtime is loaded when field detection first runs, so the server starts without it.
 
 ## Dev services
 
@@ -127,6 +128,7 @@ cd rust/scripts/parity
 ./uploads.py "$PARITY_TOKEN"                         # template uploads and added documents: responses, stored rows, preview PNGs
 ./previews.py                                        # /preview/:signed_key/:page, /templates/:id/preview, documents_page_objects (seeds its own template)
 ./documents.py "$PARITY_TOKEN"                       # documents_modify, GET documents, clone_and_replace: responses, stored rows, rendered PDFs, previews
+./detect_fields.py                                   # /templates/:id/detect_fields event streams (seeds its own template)
 ```
 
 `documents.py` uses the user and the PDFs of `uploads.py` (with `documents_seed.rb`'s files) and needs Pillow and poppler (`pdftoppm`, `pdftotext`). `DOCUMENTS_KEEP=1` keeps the templates it creates.
@@ -268,7 +270,18 @@ The template builder's document edits (issue #12):
 
 `documents.py` covers these. The PDFs differ from Rails' in their bytes (another `PDFium` build, and lopdf's rewrite), so it compares their rendered pages, text, field names, and the objects that still hold redacted text. After a redaction, Rails' `FPDF_RemoveOrphanObjects` can leave a cross-reference entry without its object; readers rebuild the table, and the Rust files don't have this. Previews of image documents are resized by `image` instead of libvips (as for uploads), so a 2-bit (four color) preview can get another palette from the same image. The script reports that as known.
 
+Field detection (`POST /templates/:id/detect_fields`, issue #11) ports `TemplatesDetectFieldsController`, `Templates::DetectFields` and `Templates::ImageToFields` (`templates/detect_fields.rs`, the `detect` crate):
+
+- The same ONNX model (`model_704_int8`, docusealco/fields-detection 2.0.0) runs through `ort`, with the inputs Rails gives it: pages rendered by PDFium at the model's resolution, or the image document's first preview, trimmed, padded and resized as libvips does it.
+- The detections are filtered, merged and sorted as in Rails (non-maximum suppression, overlapping boxes, Numo's sort order). They are then joined with the page's characters and lines (`loco_pdf::pages::detect_page`), which give fields their labels, types (date, signature, number, checkbox, …) and underscore blanks.
+- The response is the same server-sent event stream, one `{attachment_uuid, page, fields}` event per page and then `{completed: true}`. As with `ActionController::Live`, an error ends the stream without `completed`, and signed-out requests get the 500 page.
+- `scripts/fetch-onnx.sh` provides the model and runtime for development and CI. The Dockerfile now checks the model's checksum.
+
+`detect_fields.py` compares the event streams with Rails' for whole templates, single pages, image documents, parameter variants, errors in the stream and authorization. `crates/detect/tests/golden.rs` checks the fields against Rails' output for fixture files. ONNX Runtime picks its int8 kernels by CPU, so there each box only has to overlap Rails' by an intersection over union of at least 0.95; the number, order and types of the fields are compared exactly, and the fixtures' detections score well clear of the confidence thresholds.
+
 These parts return 422 ("not supported yet") or are still missing:
+
+- Field detection with a model other than the v2 one (without an `orig_target_sizes` input), and image documents whose first preview is a JPEG, a grayscale PNG or a 16-bit PNG.
 
 - These result documents fail the completion job with "not supported yet":
   - dynamic documents;
@@ -304,3 +317,4 @@ These parts return 422 ("not supported yet") or are still missing:
 | `storage` | Active Storage |
 | `jobs` | Sidekiq (Postgres-backed queue) |
 | `pdf` | PDFium, HexaPDF (rendering, modification, signing, audit trail) |
+| `detect` | `Templates::DetectFields`, `Templates::ImageToFields` (ONNX field detection) |

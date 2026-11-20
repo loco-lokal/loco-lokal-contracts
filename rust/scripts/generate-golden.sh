@@ -25,3 +25,13 @@ for name, entry in golden.items():
 (out / "upload-golden.json").write_text(json.dumps(golden, indent=1, ensure_ascii=False) + "\n")
 ' "$ROOT/rust/crates/pdf/tests/fixtures"
 echo "Wrote rust/crates/pdf/tests/fixtures/upload-*.pdf and upload-golden.json"
+
+# Field detection: needs the model in the container (/app/tmp/model.onnx, as the
+# Dockerfile installs it).
+FIXTURES="$ROOT/rust/crates/detect/tests/fixtures"
+for f in detect-form.pdf detect-image.png detect-tall.png; do
+  docker compose -f "$ROOT/compose.rust-dev.yml" cp "$FIXTURES/$f" "rails:/tmp/$f"
+done
+"${RUN[@]}" < "$ROOT/rust/scripts/golden/detect_fields.rb" 2>/dev/null | sed -n '/^{/,$p' \
+  > "$FIXTURES/detect-golden.json"
+echo "Wrote rust/crates/detect/tests/fixtures/detect-golden.json"

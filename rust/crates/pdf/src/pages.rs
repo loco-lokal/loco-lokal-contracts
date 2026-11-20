@@ -26,6 +26,7 @@ const FPDF_ANNOT: i32 = 0x01;
 const FPDF_LCD_TEXT: i32 = 0x02;
 const FPDF_NO_NATIVETEXT: i32 = 0x04;
 const FPDF_REVERSE_BYTE_ORDER: i32 = 0x10;
+const FPDF_PAGEOBJ_PATH: i32 = 2;
 const FPDF_PAGEOBJ_IMAGE: i32 = 3;
 const FPDF_PAGEOBJ_FORM: i32 = 5;
 const FLAT_NORMALDISPLAY: i32 = 0;
@@ -104,6 +105,57 @@ pub struct ImageNode {
 pub struct PageObjects {
     pub text_nodes: Vec<TextNode>,
     pub image_nodes: Vec<ImageNode>,
+}
+
+/// `Pdfium::LineNode`: a path object thin enough to be a line, in page fractions.
+/// `tilt` is 0 for horizontal lines and 90 for vertical ones.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineNode {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub tilt: i32,
+}
+
+/// A page as `Templates::DetectFields` reads it: rendered `size` pixels along its longer
+/// side, its size in points, and its characters and lines.
+#[derive(Clone, Debug)]
+pub struct DetectPage {
+    pub bitmap: Bitmap,
+    pub width: f64,
+    pub height: f64,
+    pub text_nodes: Vec<TextNode>,
+    /// Sorted by bottom edge, then `x`, as `line_nodes` sorts them.
+    pub line_nodes: Vec<LineNode>,
+}
+
+/// `prepare_page_image` (`render_to_bitmap(width: size)` for landscape pages, else
+/// `height: size`), then `text_nodes` and `line_nodes` of the same page, which is not
+/// flattened.
+pub fn detect_page(
+    pdfium: &Pdfium,
+    bytes: &[u8],
+    page_index: i64,
+    size: f64,
+) -> Result<DetectPage, String> {
+    let doc = Document::open(pdfium.bindings(), bytes)?;
+    let mut page = doc.page(page_index)?;
+    let (width, height) = (page.width(), page.height());
+    #[allow(clippy::cast_possible_truncation, reason = "clamped to MAX_SIZE")]
+    let (w, h) = if width > height {
+        (size as i64, (height * (size / width)).round() as i64)
+    } else {
+        ((width * (size / height)).round() as i64, size as i64)
+    };
+    let bitmap = page.render_size(w, h)?;
+    Ok(DetectPage {
+        bitmap,
+        width,
+        height,
+        text_nodes: page.text_nodes()?,
+        line_nodes: page.line_nodes(),
+    })
 }
 
 /// `generate_pdf_preview_from_io`: the page rendered `MAX_WIDTH` wide (forms drawn, not
@@ -371,9 +423,14 @@ impl Page<'_> {
     fn render(&mut self, width: i32) -> Result<Bitmap, String> {
         let scale = f64::from(width) / self.width();
         #[allow(clippy::cast_possible_truncation, reason = "clamped to MAX_SIZE")]
-        let height = ((self.height() * scale).round() as i64).clamp(1, MAX_SIZE);
-        let w = i32::try_from(i64::from(width).clamp(1, MAX_SIZE)).unwrap_or(1);
-        let h = i32::try_from(height).unwrap_or(1);
+        let height = (self.height() * scale).round() as i64;
+        self.render_size(i64::from(width), height)
+    }
+
+    /// `render_to_bitmap` at a computed size (each side clamped to `1..MAX_SIZE`).
+    fn render_size(&mut self, width: i64, height: i64) -> Result<Bitmap, String> {
+        let w = i32::try_from(width.clamp(1, MAX_SIZE)).unwrap_or(1);
+        let h = i32::try_from(height.clamp(1, MAX_SIZE)).unwrap_or(1);
         let flags = FPDF_ANNOT | FPDF_LCD_TEXT | FPDF_NO_NATIVETEXT | FPDF_REVERSE_BYTE_ORDER;
         // SAFETY: a loaded page; the bitmap is destroyed below.
         unsafe {
@@ -766,6 +823,59 @@ impl Page<'_> {
             }
         });
         Ok(nodes)
+    }
+
+    /// `line_nodes`: path objects of 2 to 10 segments under 10 points thick (and over a
+    /// point long), sorted by bottom edge, then `x`, with Ruby's sort.
+    fn line_nodes(&self) -> Vec<LineNode> {
+        let (width, height) = (self.width(), self.height());
+        let mut nodes = Vec::new();
+        for object in self.objects() {
+            if self.object_type(object) != FPDF_PAGEOBJ_PATH {
+                continue;
+            }
+            let (mut l, mut b, mut r, mut t) = (0f32, 0f32, 0f32, 0f32);
+            // SAFETY: an object of the loaded page and floats to fill. Rails ignores the
+            // result, reading the zeroed floats on failure.
+            let segments = unsafe {
+                self.b()
+                    .FPDFPageObj_GetBounds(object, &raw mut l, &raw mut b, &raw mut r, &raw mut t);
+                self.b().FPDFPath_CountSegments(object)
+            };
+            let (left, bottom) = (f64::from(l), f64::from(b));
+            let obj_width = f64::from(r) - left;
+            let obj_height = f64::from(t) - bottom;
+            if obj_width < 1.0 && obj_height < 1.0 {
+                continue;
+            }
+            if segments < 2 || !(segments <= 10 && (obj_height < 10.0 || obj_width < 10.0)) {
+                continue;
+            }
+            let tilt = if obj_width > obj_height && obj_height < 10.0 {
+                0
+            } else if obj_height > obj_width && obj_width < 10.0 {
+                90
+            } else {
+                continue;
+            };
+            nodes.push(LineNode {
+                x: left / width,
+                y: (height - bottom - obj_height) / height,
+                w: obj_width / width,
+                h: obj_height / height,
+                tilt,
+            });
+        }
+        ruby_sort(&mut nodes, |a, b| {
+            let (a_end, b_end) = (a.y + a.h, b.y + b.h);
+            #[allow(clippy::float_cmp, reason = "Ruby's `a.endy == b.endy`")]
+            if a_end == b_end {
+                spaceship(a.x, b.x)
+            } else {
+                spaceship(a_end, b_end)
+            }
+        });
+        nodes
     }
 
     /// `image_nodes`: the bounds of the page's image objects, clamped to the page.

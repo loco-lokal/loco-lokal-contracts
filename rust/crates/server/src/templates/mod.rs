@@ -6,6 +6,7 @@
 //! converts them with the closed-source `WordCraft` gem) and uploads from a URL.
 
 pub mod clone_replace;
+pub mod detect_fields;
 pub mod documents;
 mod images;
 pub mod modify;
